@@ -3,6 +3,15 @@
 import { Card, Stat, Badge } from "./Card";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 
+function fmtEventDate(d: string | null | undefined): string {
+  if (!d) return "\u2014";
+  try {
+    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return d;
+  }
+}
+
 export default function RiskPanel({ data }: { data: Record<string, any> | null }) {
   if (!data) {
     return (
@@ -50,7 +59,7 @@ export default function RiskPanel({ data }: { data: Record<string, any> | null }
               <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Worst Drawdowns</div>
               {dd.events.slice(0, 5).map((e: any, i: number) => (
                 <div key={i} className="data-row text-sm">
-                  <span className="text-gray-400 font-mono text-xs">{e.start_date} \u2192 {e.trough_date || "ongoing"}</span>
+                  <span className="text-gray-400 font-mono text-xs">{e.start_date} &rarr; {e.trough_date || "ongoing"}</span>
                   <span className="text-red-400 font-mono tabular-nums">{fmtPercent(e.drawdown_pct)}</span>
                   <span className="text-gray-500 text-xs">{e.duration_days}d</span>
                   <span className="text-gray-600 text-xs">{e.recovery_days != null ? `${e.recovery_days}d rec.` : "no rec."}</span>
@@ -64,32 +73,57 @@ export default function RiskPanel({ data }: { data: Record<string, any> | null }
       {/* Stress Tests */}
       {scenarios.length > 0 && (
         <Card title="Historical Stress Tests">
-          {scenarios.map((s: any, i: number) => (
-            <div key={i} className="data-row">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-300">{s.name || s.scenario}</span>
-                {s.period && <span className="text-[10px] text-gray-600">{s.period}</span>}
-              </div>
-              <span className={`font-mono font-bold tabular-nums ${(s.ticker_return || s.return_pct || 0) < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                {fmtPercent(s.ticker_return || s.return_pct)}
-              </span>
+          <div className="space-y-0">
+            {/* Header */}
+            <div className="grid grid-cols-12 gap-2 pb-2 mb-2 border-b border-white/[0.06] text-[10px] text-gray-500 uppercase tracking-wider">
+              <div className="col-span-3">Scenario</div>
+              <div className="col-span-3">Period</div>
+              <div className="col-span-2 text-right">Stock</div>
+              <div className="col-span-2 text-right">S&amp;P 500</div>
+              <div className="col-span-2 text-right">Beta-Adj.</div>
             </div>
-          ))}
+            {scenarios.map((s: any, i: number) => {
+              const stockRet = s.stock_return;
+              const benchRet = s.benchmark_return;
+              const betaRet = s.beta_adjusted_return;
+              return (
+                <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-white/[0.04] items-center">
+                  <div className="col-span-3">
+                    <div className="text-sm text-gray-300">{s.description || s.name}</div>
+                  </div>
+                  <div className="col-span-3 text-xs text-gray-500 font-mono">{s.period}</div>
+                  <div className={`col-span-2 text-right font-mono text-sm font-bold tabular-nums ${stockRet != null ? (stockRet < 0 ? "text-red-400" : "text-emerald-400") : "text-gray-600"}`}>
+                    {stockRet != null ? fmtPercent(stockRet * 100, 1) : "N/A"}
+                  </div>
+                  <div className={`col-span-2 text-right font-mono text-sm tabular-nums ${benchRet != null ? (benchRet < 0 ? "text-red-400" : "text-emerald-400") : "text-gray-600"}`}>
+                    {benchRet != null ? fmtPercent(benchRet * 100, 1) : "N/A"}
+                  </div>
+                  <div className={`col-span-2 text-right font-mono text-sm tabular-nums ${betaRet != null ? (betaRet < 0 ? "text-red-400" : "text-emerald-400") : "text-gray-600"}`}>
+                    {betaRet != null ? fmtPercent(betaRet * 100, 1) : "N/A"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </Card>
       )}
 
       {/* Upcoming Events */}
       {events.length > 0 && (
         <Card title="Upcoming Events">
-          {events.map((e: any, i: number) => (
-            <div key={i} className="data-row">
-              <div className="flex items-center gap-2">
-                <Badge text={e.type || "event"} variant="info" size="sm" />
-                <span className="text-sm text-gray-300">{e.description || e.name || "\u2014"}</span>
+          {events.map((e: any, i: number) => {
+            const importance = e.importance || "medium";
+            const variant = importance === "high" ? "warning" : importance === "low" ? "neutral" : "info";
+            return (
+              <div key={i} className="data-row">
+                <div className="flex items-center gap-2">
+                  <Badge text={(e.event_type || e.type || "event").replace(/_/g, " ")} variant={variant} size="sm" />
+                  <span className="text-sm text-gray-300">{e.description || e.name || "\u2014"}</span>
+                </div>
+                <span className="text-xs text-gray-400 font-mono">{fmtEventDate(e.date)}</span>
               </div>
-              <span className="text-xs text-gray-500 font-mono">{e.date || "\u2014"}</span>
-            </div>
-          ))}
+            );
+          })}
         </Card>
       )}
     </div>
