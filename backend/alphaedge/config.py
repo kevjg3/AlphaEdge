@@ -15,11 +15,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Caching
-    cache_dir: str = "./data/cache"
+    cache_dir: str = "/tmp/alphaedge_cache"
     cache_ttl: int = 300  # seconds
 
     # Data storage
-    data_dir: str = "./data"
+    data_dir: str = "/tmp/alphaedge_data"
 
     # SEC EDGAR
     edgar_user_agent: str = "AlphaEdge/0.1 (dev@example.com)"
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     spacy_model: str = "en_core_web_sm"
 
     # CORS
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["*"]
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
