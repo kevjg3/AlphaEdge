@@ -474,3 +474,61 @@ async def list_runs() -> list[AnalysisStatusResponse]:
         )
         for r in _runs.values()
     ]
+
+
+@router.post("/sync", response_model=FullAnalysisResponse)
+async def run_analysis_sync(req: AnalysisRequest) -> FullAnalysisResponse:
+    """Run the full analysis synchronously and return the result.
+
+    This avoids in-memory state issues on single-worker deployments (Railway).
+    The client waits for the full result — no polling needed.
+    """
+    import asyncio
+
+    ticker = req.ticker.upper().strip()
+    run_id = generate_run_id(ticker, req.seed)
+
+    _runs[run_id] = {
+        "run_id": run_id,
+        "ticker": ticker,
+        "status": AnalysisStatus.PENDING,
+        "started_at": datetime.now(timezone.utc),
+        "completed_at": None,
+        "progress": 0.0,
+        "current_step": "queued",
+        "warnings": [],
+        "snapshot": None,
+        "fundamentals": None,
+        "technicals": None,
+        "news": None,
+        "forecast": None,
+        "risk": None,
+        "quant": None,
+        "attribution": [],
+    }
+
+    # Run the heavy analysis in a thread so we don't block the event loop
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_analysis, run_id, req)
+
+    run = _runs[run_id]
+    snapshot = run.get("snapshot")
+    if snapshot is None:
+        snapshot = SnapshotResponse(ticker=ticker)
+
+    return FullAnalysisResponse(
+        run_id=run_id,
+        ticker=ticker,
+        status=run["status"],
+        snapshot=snapshot,
+        fundamentals=run.get("fundamentals"),
+        technicals=run.get("technicals"),
+        news=run.get("news"),
+        forecast=run.get("forecast"),
+        risk=run.get("risk"),
+        quant=run.get("quant"),
+        started_at=run["started_at"],
+        completed_at=run.get("completed_at"),
+        warnings=run.get("warnings", []),
+        attribution=run.get("attribution", []),
+    )

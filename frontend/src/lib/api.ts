@@ -1,7 +1,25 @@
 const BASE = "/api/v1";
 
+// For long-running requests, call the backend directly to avoid Vercel proxy timeout
+const DIRECT_BACKEND =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "";
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+/** Fetch directly from the backend (bypasses Vercel rewrite proxy). */
+async function fetchBackendJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  const base = DIRECT_BACKEND ? `${DIRECT_BACKEND}/api/v1` : BASE;
+  const res = await fetch(`${base}${url}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
@@ -75,6 +93,13 @@ export const api = {
 
   startAnalysis: (ticker: string, seed = 42) =>
     fetchJSON<AnalysisStatus>("/analysis/run", {
+      method: "POST",
+      body: JSON.stringify({ ticker, seed }),
+    }),
+
+  /** Run analysis synchronously — calls backend directly to avoid proxy timeout. */
+  runAnalysisSync: (ticker: string, seed = 42) =>
+    fetchBackendJSON<FullAnalysis>("/analysis/sync", {
       method: "POST",
       body: JSON.stringify({ ticker, seed }),
     }),

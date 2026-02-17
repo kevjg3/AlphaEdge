@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, AnalysisStatus, FullAnalysis } from "@/lib/api";
+import { useMutation } from "@tanstack/react-query";
+import { api, FullAnalysis } from "@/lib/api";
 import SnapshotPanel from "@/components/SnapshotPanel";
 import FundamentalsPanel from "@/components/FundamentalsPanel";
 import TechnicalsPanel from "@/components/TechnicalsPanel";
@@ -10,7 +10,6 @@ import NewsPanel from "@/components/NewsPanel";
 import ForecastPanel from "@/components/ForecastPanel";
 import RiskPanel from "@/components/RiskPanel";
 import QuantPanel from "@/components/QuantPanel";
-import ProgressBar from "@/components/ProgressBar";
 
 const TABS = [
   { id: "snapshot", label: "Snapshot", icon: "\u{1F4CA}" },
@@ -22,44 +21,35 @@ const TABS = [
   { id: "quant", label: "Quant", icon: "\u{1F9EA}" },
 ];
 
+const STEPS = [
+  "Fetching data",
+  "Fundamentals",
+  "Technicals",
+  "News & NLP",
+  "Forecasting",
+  "Risk analysis",
+  "Quant metrics",
+  "Done",
+];
+
 export default function Home() {
   const [ticker, setTicker] = useState("");
-  const [runId, setRunId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("snapshot");
 
-  const startMutation = useMutation({
-    mutationFn: (t: string) => api.startAnalysis(t),
-    onSuccess: (data) => setRunId(data.run_id),
-  });
-
-  const statusQuery = useQuery<AnalysisStatus>({
-    queryKey: ["status", runId],
-    queryFn: () => api.getStatus(runId!),
-    enabled: !!runId,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "completed" || status === "failed" ? false : 2000;
-    },
-  });
-
-  const resultQuery = useQuery<FullAnalysis>({
-    queryKey: ["result", runId],
-    queryFn: () => api.getResult(runId!),
-    enabled: statusQuery.data?.status === "completed",
+  const analysisMutation = useMutation({
+    mutationFn: (t: string) => api.runAnalysisSync(t),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const t = ticker.trim().toUpperCase();
     if (!t) return;
-    setRunId(null);
     setActiveTab("snapshot");
-    startMutation.mutate(t);
+    analysisMutation.mutate(t);
   };
 
-  const status = statusQuery.data;
-  const result = resultQuery.data;
-  const isRunning = status?.status === "running" || status?.status === "pending";
+  const result: FullAnalysis | undefined = analysisMutation.data;
+  const isRunning = analysisMutation.isPending;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -100,31 +90,23 @@ export default function Home() {
             </div>
             <button
               type="submit"
-              disabled={startMutation.isPending || isRunning}
+              disabled={isRunning}
               className="bg-brand-gradient hover:opacity-90 disabled:opacity-40
                 text-white px-6 py-2.5 rounded-xl text-sm font-semibold
                 shadow-glow-sm hover:shadow-glow
                 transition-all duration-200 whitespace-nowrap"
             >
-              {startMutation.isPending ? (
+              {isRunning ? (
                 <span className="flex items-center gap-2">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                  Starting...
-                </span>
-              ) : isRunning ? (
-                <span className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-300 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-brand-400" />
-                  </span>
-                  Running...
+                  Analyzing...
                 </span>
               ) : "Analyze"}
             </button>
           </form>
 
           {/* Right side status */}
-          {result && (
+          {result && !isRunning && (
             <div className="hidden lg:flex items-center gap-2 text-xs text-gray-500">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               Analysis complete
@@ -134,40 +116,74 @@ export default function Home() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* Progress Bar */}
-        {isRunning && status && (
+        {/* Loading State */}
+        {isRunning && (
           <div className="animate-slide-down">
-            <ProgressBar progress={status.progress} step={status.current_step} />
+            <div className="bg-surface-raised border border-white/[0.06] rounded-2xl p-6 mb-5">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-brand-gradient flex items-center justify-center shadow-glow-sm">
+                    <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Running Full Analysis</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    This takes 30–90 seconds — fetching data, running models, and computing metrics...
+                  </p>
+                </div>
+              </div>
+              {/* Animated progress steps */}
+              <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+                {STEPS.map((step, i) => (
+                  <div key={step} className="flex flex-col items-center gap-1.5">
+                    <div
+                      className="w-2 h-2 rounded-full animate-pulse"
+                      style={{
+                        backgroundColor: "rgba(99, 102, 241, 0.6)",
+                        animationDelay: `${i * 0.3}s`,
+                      }}
+                    />
+                    <span className="text-[9px] text-gray-600 text-center leading-tight">
+                      {step}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
         {/* Error States */}
-        {startMutation.isError && (
+        {analysisMutation.isError && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-5 text-red-300 text-sm animate-slide-down flex items-start gap-3">
             <span className="text-red-400 mt-0.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
             </span>
-            <span>Failed to start analysis: {startMutation.error.message}</span>
+            <span>Analysis failed: {analysisMutation.error.message}</span>
           </div>
         )}
-        {status?.status === "failed" && (
+        {result?.status === "failed" && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-5 text-red-300 text-sm animate-slide-down flex items-start gap-3">
             <span className="text-red-400 mt-0.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
             </span>
-            <span>Analysis failed. {status.warnings?.join("; ")}</span>
+            <span>Analysis completed with errors. {result.warnings?.join("; ")}</span>
           </div>
         )}
 
         {/* Warnings */}
-        {result?.warnings && result.warnings.length > 0 && (
+        {result && result.warnings && result.warnings.length > 0 && result.status !== "failed" && (
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3.5 mb-5 text-amber-300 text-xs animate-fade-in">
             {result.warnings.map((w, i) => <div key={i}>{w}</div>)}
           </div>
         )}
 
         {/* Tab Navigation */}
-        {result && (
+        {result && !isRunning && (
           <>
             <nav className="flex gap-1 mb-6 bg-surface-raised/50 p-1.5 rounded-xl border border-white/[0.04] animate-fade-in">
               {TABS.map((tab) => (
@@ -198,7 +214,7 @@ export default function Home() {
         )}
 
         {/* Empty State */}
-        {!runId && !startMutation.isPending && (
+        {!isRunning && !result && !analysisMutation.isError && (
           <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
             <div className="w-16 h-16 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-glow mb-6">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
