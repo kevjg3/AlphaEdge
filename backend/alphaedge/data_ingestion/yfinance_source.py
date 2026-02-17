@@ -11,6 +11,12 @@ import pandas as pd
 import yfinance as yf
 from diskcache import Cache
 
+# Reduce yfinance timeout for deployed environments (default is 30s)
+try:
+    yf.set_tz_cache_location("/tmp/yf_tz_cache")
+except Exception:
+    pass
+
 from alphaedge.config import settings
 from alphaedge.data_ingestion.base import (
     DataSource, DataSourceName, FetchResult, SourceAttribution,
@@ -259,8 +265,12 @@ class YFinanceSource(DataSource):
 
     # --- Peer Selection ---
 
-    def get_peers(self, ticker: str, n: int = 8) -> FetchResult:
-        """Select comparable peers by sector + industry + market cap proximity."""
+    def get_peers(self, ticker: str, n: int = 5) -> FetchResult:
+        """Select comparable peers by sector + industry + market cap proximity.
+
+        Only checks up to ``n + 4`` candidates to limit network calls on
+        constrained deployments (Railway).
+        """
         info_res = self.get_company_info(ticker)
         if not info_res.success:
             return FetchResult(data=[], attribution=self._attr(),
@@ -278,9 +288,14 @@ class YFinanceSource(DataSource):
             ws.append(f"No curated peers for sector '{sector}'")
             return FetchResult(data=[], attribution=self._attr(), warnings=ws)
 
-        # Filter by market cap proximity (0.2x – 5x)
+        # Only check a limited number of candidates to keep latency low.
+        # Each candidate requires a yfinance API call for market cap.
+        max_checks = n + 4  # check a few extra to have margin for filtering
         peers_with_cap: list[tuple[str, float]] = []
-        for c in candidates:
+        consecutive_fails = 0
+        for c in candidates[:max_checks]:
+            if consecutive_fails >= 2:
+                break
             try:
                 ct = yf.Ticker(c)
                 c_cap = ct.info.get("marketCap", 0) or 0
@@ -288,7 +303,9 @@ class YFinanceSource(DataSource):
                     ratio = c_cap / market_cap
                     if 0.2 <= ratio <= 5.0:
                         peers_with_cap.append((c, abs(1 - ratio)))
+                consecutive_fails = 0
             except Exception:
+                consecutive_fails += 1
                 continue
 
         if not peers_with_cap:

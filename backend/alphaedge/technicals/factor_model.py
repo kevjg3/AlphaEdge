@@ -33,11 +33,10 @@ class FactorExposure:
 class FactorModel:
     """Estimate factor exposures via OLS regression against ETF proxies."""
 
+    # Reduced to 2 ETFs for faster deployed performance (was 4: +IWD, IWF)
     FACTOR_ETFS = {
         "market": "SPY",
         "size_long": "IWM",
-        "value_long": "IWD",
-        "growth_long": "IWF",
     }
 
     def __init__(self, yf_source: YFinanceSource):

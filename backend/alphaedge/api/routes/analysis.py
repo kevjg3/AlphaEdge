@@ -27,11 +27,18 @@ _runs: dict[str, dict[str, Any]] = {}
 
 def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
     """Execute the full analysis pipeline in the background."""
+    import time as _time
+
     run = _runs[run_id]
     run["status"] = AnalysisStatus.RUNNING
     ticker = req.ticker.upper()
     warnings: list[str] = []
     attribution: list[dict] = []
+    _t0 = _time.time()
+
+    def _lap(label: str):
+        elapsed = _time.time() - _t0
+        logger.info("[%s] %s — %.1fs elapsed", ticker, label, elapsed)
 
     try:
         # ── Data ingestion ──
@@ -63,6 +70,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
 
         if hist_df is None or hist_df.empty:
             raise ValueError(f"No historical data for {ticker}")
+        _lap("data fetched")
 
         # 1-day change
         change_1d = change_1d_pct = None
@@ -114,6 +122,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
 
                 vs = ValuationSummary(yf, edgar)
                 fundamentals_data = vs.full_valuation(ticker)
+                _lap("fundamentals done")
                 run["progress"] = 0.30
 
                 # Generate investment thesis
@@ -160,6 +169,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 except Exception as e:
                     warnings.append(f"Factor model failed: {e}")
 
+                _lap("technicals computed")
                 technicals_data = {
                     "indicators": indicators,
                     "regime": regime.to_dict() if hasattr(regime, "to_dict") else regime,
@@ -189,6 +199,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 synthesizer = NewsSynthesizer(sentiment_analyzer, event_detector)
                 synthesis = synthesizer.synthesize(articles, ticker)
 
+                _lap("news NLP done")
                 news_data = {
                     "articles": [
                         {"title": a.title, "source": a.source, "url": a.url}
@@ -235,6 +246,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                     ohlcv_df=hist_df, ticker=ticker,
                 )
                 forecast_data = multi.to_dict() if hasattr(multi, "to_dict") else {}
+                _lap("forecasting done")
                 run["progress"] = 0.80
             except Exception as e:
                 logger.warning("Forecasting failed: %s", e)
@@ -265,6 +277,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 events = EventCalendar(yf)
                 upcoming = events.get_upcoming_events(ticker)
 
+                _lap("risk analysis done")
                 risk_data = {
                     "var": var_result.to_dict() if hasattr(var_result, "to_dict") else var_result,
                     "drawdown": dd_result.to_dict() if hasattr(dd_result, "to_dict") else dd_result,
@@ -306,22 +319,27 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
             except Exception:
                 pass
             performance = perf_analyzer.compute(prices, spy_prices)
+            _lap("performance metrics done")
 
             # Return distribution analysis
             return_analyzer = ReturnAnalyzer()
             return_analysis = return_analyzer.analyze(prices)
+            _lap("return analysis done")
 
-            # Correlation matrix
+            # Correlation matrix (reduced benchmarks for speed)
             corr_analyzer = CorrelationAnalyzer(yf)
             correlation = corr_analyzer.analyze(ticker, prices)
+            _lap("correlation done")
 
-            # Monte Carlo simulation
+            # Monte Carlo simulation (500 paths for deployed, fast enough)
             mc_sim = MonteCarloSimulator(seed=req.seed)
-            monte_carlo = mc_sim.simulate(prices, horizon_days=252, n_paths=2000)
+            monte_carlo = mc_sim.simulate(prices, horizon_days=252, n_paths=500)
+            _lap("monte carlo done")
 
             # Signal backtesting
             backtester = SignalBacktester()
             signal_backtest = backtester.backtest_all(hist_df)
+            _lap("signal backtest done")
 
             # Price series for chart (downsampled)
             price_series = []
@@ -347,6 +365,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
             logger.warning("Quantitative analysis failed: %s", e)
             warnings.append(f"Quantitative analysis failed: {e}")
 
+        _lap("ALL DONE")
         # ── Assemble result ──
         run["current_step"] = "completed"
         run["progress"] = 1.0

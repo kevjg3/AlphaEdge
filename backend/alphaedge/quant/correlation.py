@@ -9,18 +9,12 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Benchmark ETFs for correlation analysis
+# Benchmark ETFs for correlation analysis (kept lean for deployed performance)
 BENCHMARK_TICKERS = {
     "SPY": "S&P 500",
     "QQQ": "Nasdaq 100",
-    "IWM": "Russell 2000",
     "TLT": "20Y+ Treasury",
     "GLD": "Gold",
-    "DIA": "Dow Jones",
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLE": "Energy",
-    "XLV": "Healthcare",
 }
 
 
@@ -127,12 +121,19 @@ class CorrelationAnalyzer:
         return result
 
     def _fetch_benchmarks(self, tickers: list[str], min_length: int) -> dict[str, pd.Series]:
-        """Fetch benchmark price series via yfinance."""
+        """Fetch benchmark price series via yfinance.
+
+        Stops early if consecutive timeouts are detected (Railway can be slow).
+        """
         result = {}
         if not self._yf:
             return result
 
-        for t in tickers[:10]:  # Cap at 10 benchmarks
+        consecutive_fails = 0
+        for t in tickers[:6]:  # Cap at 6 benchmarks
+            if consecutive_fails >= 2:
+                logger.info("Skipping remaining benchmarks after %d consecutive failures", consecutive_fails)
+                break
             try:
                 hist = self._yf.get_history(t, period="2y")
                 if hist.success and not hist.data.empty:
@@ -140,8 +141,12 @@ class CorrelationAnalyzer:
                     if isinstance(close, pd.DataFrame):
                         close = close.iloc[:, 0]
                     result[t] = close
+                    consecutive_fails = 0
+                else:
+                    consecutive_fails += 1
             except Exception as e:
                 logger.debug("Failed to fetch benchmark %s: %s", t, e)
+                consecutive_fails += 1
                 continue
 
         return result

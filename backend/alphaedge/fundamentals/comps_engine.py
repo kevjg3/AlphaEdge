@@ -108,7 +108,7 @@ class CompsEngine:
 
         # Fetch peer metrics
         peer_metrics: list[CompMetrics] = []
-        for p in peers[:15]:  # cap at 15 peers
+        for p in peers[:6]:  # cap at 6 peers (reduced for deploy speed)
             if p.upper() == ticker.upper():
                 continue
             m = self._fetch_metrics(p)

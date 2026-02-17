@@ -107,10 +107,22 @@ class ScenarioAnalyzer:
     ) -> list[ScenarioResult]:
         """Compute how a ticker would have performed in historical scenarios.
 
-        If historical data unavailable for the period, use beta-adjusted
-        benchmark return as a proxy.
+        Fetches a single long history and slices it for each scenario
+        (instead of N separate API calls). Falls back to beta-adjusted
+        benchmark return when data is unavailable.
         """
         results: list[ScenarioResult] = []
+
+        # Fetch full history once (max period) to avoid N separate API calls
+        full_hist = None
+        if self._yf_source:
+            try:
+                import yfinance as yf
+                full_hist = yf.Ticker(ticker).history(period="max")
+                if full_hist.empty:
+                    full_hist = None
+            except Exception:
+                full_hist = None
 
         for name, scenario in HISTORICAL_SCENARIOS.items():
             start = scenario["start"]
@@ -123,11 +135,10 @@ class ScenarioAnalyzer:
             data_avail = False
             warning = ""
 
-            # Try to fetch actual historical data
-            if self._yf_source:
+            # Slice the pre-fetched history for this scenario period
+            if full_hist is not None:
                 try:
-                    import yfinance as yf
-                    hist = yf.Ticker(ticker).history(start=start, end=end)
+                    hist = full_hist.loc[start:end]
                     if not hist.empty and len(hist) > 1:
                         stock_ret = float(hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1)
                         running_max = hist["Close"].expanding().max()
