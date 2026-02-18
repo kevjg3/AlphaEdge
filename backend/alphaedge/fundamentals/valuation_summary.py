@@ -87,7 +87,12 @@ class ValuationSummary:
     def _combine_ranges(
         self, comps: dict, dcf: dict, shares: float | None,
     ) -> dict:
-        """Combine valuation ranges from comps and DCF into per-share prices."""
+        """Combine valuation ranges from comps and DCF into per-share prices.
+
+        Uses the DCF point estimate and comps low/mid/high (converted from
+        market cap to per-share). The sensitivity grid is NOT included — it's
+        variations of a single model and would over-weight DCF in the median.
+        """
         per_share_prices: list[float] = []
 
         # Comps range — values are implied MARKET CAPs, convert to per-share
@@ -100,18 +105,10 @@ class ValuationSummary:
                     if per_share > 0:
                         per_share_prices.append(per_share)
 
-        # DCF implied price (already per-share)
+        # DCF implied price (single point estimate, already per-share)
         dcf_price = dcf.get("implied_price")
         if dcf_price is not None and dcf_price > 0:
             per_share_prices.append(float(dcf_price))
-
-        # DCF sensitivity range (already per-share)
-        grid = dcf.get("sensitivity_grid", {}).get("implied_prices", {})
-        for _wacc_key, tg_map in grid.items():
-            if isinstance(tg_map, dict):
-                for _tg_key, price in tg_map.items():
-                    if price is not None and price > 0:
-                        per_share_prices.append(float(price))
 
         if not per_share_prices:
             return {}

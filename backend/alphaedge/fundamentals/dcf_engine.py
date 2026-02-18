@@ -217,32 +217,45 @@ class DCFEngine:
         a.nwc_pct_revenue = _SECTOR_NWC.get(sector, 0.12)
 
         # Revenue growth — use actual growth but apply conservative decay
+        # The trailing quarter's revenue growth can be misleading (one bad quarter),
+        # so we also check earnings growth and floor at GDP-like growth for DCF.
         rev_growth = _sf(info.get("revenue_growth")) or _sf(info.get("revenueGrowth"))
+        earnings_growth = _sf(info.get("earnings_growth")) or _sf(info.get("earningsGrowth"))
         if rev_growth is not None:
-            # Cap at 20% and floor at -5%; decay 25% per year toward terminal
-            base = min(max(rev_growth, -0.05), 0.20)
+            # If revenue growth is negative but earnings growth is positive,
+            # use a blend — the company may be in a temporary revenue dip
+            if rev_growth < 0 and earnings_growth is not None and earnings_growth > 0:
+                rev_growth = (rev_growth + earnings_growth) / 2
+
+            # Cap at 25% and floor at GDP growth (2%) — a DCF models long-term
+            # value, projecting negative revenue for 5 years is almost never right
+            base = min(max(rev_growth, a.terminal_growth_rate), 0.25)
             terminal = a.terminal_growth_rate
             a.revenue_growth_rates = [
                 round(base + (terminal - base) * (i / a.projection_years), 4)
                 for i in range(a.projection_years)
             ]
 
-        # Operating margin — use actual with light mean-reversion toward sector
+        # Sector median operating margins (sourced from S&P 500 sector averages)
+        _SECTOR_OP_MARGIN = {
+            "technology": 0.25, "communication services": 0.20,
+            "healthcare": 0.15, "financial services": 0.30,
+            "consumer cyclical": 0.10, "consumer defensive": 0.15,
+            "industrials": 0.12, "basic materials": 0.12,
+            "energy": 0.10, "utilities": 0.18, "real estate": 0.30,
+        }
+        sector_avg_margin = _SECTOR_OP_MARGIN.get(sector, 0.12)
+
+        # Operating margin — blend actual with sector average
         op_margin = _sf(info.get("operating_margins")) or _sf(info.get("operatingMargins"))
         if op_margin is not None:
-            # Sector median operating margins (sourced from S&P 500 sector averages)
-            sector_avg = {
-                "technology": 0.25, "communication services": 0.20,
-                "healthcare": 0.15, "financial services": 0.30,
-                "consumer cyclical": 0.10, "consumer defensive": 0.15,
-                "industrials": 0.12, "basic materials": 0.12,
-                "energy": 0.10, "utilities": 0.18, "real estate": 0.30,
-            }.get(sector, 0.12)
-            # Blend 85% actual + 15% sector average (light mean reversion)
-            blended = 0.85 * op_margin + 0.15 * sector_avg
-            a.operating_margin = min(max(blended, 0.02), 0.50)
+            # Blend 70% actual + 30% sector average (mean-reversion)
+            blended = 0.70 * op_margin + 0.30 * sector_avg_margin
+            # Floor at sector average — a 5-year DCF should assume the company
+            # can at least reach average profitability over the projection period
+            a.operating_margin = min(max(blended, sector_avg_margin), 0.50)
         else:
-            a.operating_margin = 0.12  # conservative fallback
+            a.operating_margin = sector_avg_margin
 
         # Shares
         shares = _sf(info.get("sharesOutstanding")) or _sf(info.get("shares_outstanding"))
