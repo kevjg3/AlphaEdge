@@ -217,7 +217,7 @@ def _identify_strengths(info: dict, health: dict) -> list[str]:
         strengths.append(f"Strong balance sheet with current ratio of {current_ratio:.1f}x")
 
     div_yield = info.get("dividend_yield")
-    if div_yield is not None and div_yield > 0.02:
+    if div_yield is not None and div_yield > 0.015:
         strengths.append(f"Attractive dividend yield of {div_yield:.1%}")
 
     market_cap = info.get("market_cap")
