@@ -106,14 +106,17 @@ class CompsEngine:
             warnings.extend(peers_result.warnings)
             attribution.append(peers_result.attribution.to_dict())
 
-        # Fetch peer metrics
+        # Fetch peer metrics in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        filtered_peers = [p for p in peers[:6] if p.upper() != ticker.upper()]
         peer_metrics: list[CompMetrics] = []
-        for p in peers[:6]:  # cap at 6 peers (reduced for deploy speed)
-            if p.upper() == ticker.upper():
-                continue
-            m = self._fetch_metrics(p)
-            if m is not None and m.market_cap is not None:
-                peer_metrics.append(m)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = {pool.submit(self._fetch_metrics, p): p for p in filtered_peers}
+            for fut in as_completed(futures):
+                m = fut.result()
+                if m is not None and m.market_cap is not None:
+                    peer_metrics.append(m)
 
         if not peer_metrics:
             warnings.append("No peer data available for comps analysis")

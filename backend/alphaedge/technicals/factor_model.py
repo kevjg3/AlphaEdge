@@ -54,16 +54,28 @@ class FactorModel:
         ticker_prices = hist_result.data["Close"].tail(lookback_days)
         ticker_returns = np.log(ticker_prices / ticker_prices.shift(1)).dropna()
 
-        # Fetch factor ETF returns
-        factor_returns = {}
-        for factor_name, etf in self.FACTOR_ETFS.items():
+        # Fetch factor ETF returns in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        period = f"{max(lookback_days // 252, 1)}y"
+
+        def _fetch_factor(factor_name: str, etf: str):
             try:
-                etf_result = self.yf.get_history(etf, period=f"{max(lookback_days // 252, 1)}y")
-                if etf_result.success and etf_result.data is not None and not etf_result.data.empty:
-                    etf_prices = etf_result.data["Close"].tail(lookback_days)
-                    factor_returns[factor_name] = np.log(etf_prices / etf_prices.shift(1)).dropna()
+                res = self.yf.get_history(etf, period=period)
+                if res.success and res.data is not None and not res.data.empty:
+                    prices = res.data["Close"].tail(lookback_days)
+                    return (factor_name, np.log(prices / prices.shift(1)).dropna())
             except Exception as e:
                 warnings.append(f"Failed to fetch {etf}: {e}")
+            return (factor_name, None)
+
+        factor_returns = {}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_fetch_factor, fn, etf) for fn, etf in self.FACTOR_ETFS.items()]
+            for fut in as_completed(futures):
+                fn, ret = fut.result()
+                if ret is not None:
+                    factor_returns[fn] = ret
 
         if "market" not in factor_returns:
             return {"exposures": [], "warnings": warnings + ["Market factor (SPY) unavailable"]}

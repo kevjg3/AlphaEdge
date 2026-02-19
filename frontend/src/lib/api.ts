@@ -104,6 +104,86 @@ export const api = {
       body: JSON.stringify({ ticker, seed }),
     }),
 
+  /**
+   * Run analysis with SSE streaming for real-time progress.
+   * Returns a promise that resolves with the full result.
+   * Calls onProgress with { step, progress } on each update.
+   */
+  runAnalysisStream: (
+    ticker: string,
+    onProgress: (step: string, progress: number) => void,
+    seed = 42,
+  ): Promise<FullAnalysis> => {
+    return new Promise((resolve, reject) => {
+      const base = DIRECT_BACKEND ? `${DIRECT_BACKEND}/api/v1` : BASE;
+      const url = `${base}/analysis/stream`;
+
+      // Use fetch + ReadableStream to handle SSE from a POST endpoint
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, seed }),
+      })
+        .then((res) => {
+          if (!res.ok) {
+            return res.text().then((t) => {
+              throw new Error(`${res.status}: ${t}`);
+            });
+          }
+          const reader = res.body?.getReader();
+          if (!reader) throw new Error("No response body");
+
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          const pump = (): Promise<void> =>
+            reader.read().then(({ done, value }) => {
+              if (done) {
+                reject(new Error("Stream ended without result"));
+                return;
+              }
+              buffer += decoder.decode(value, { stream: true });
+
+              // Parse SSE events from buffer
+              const events = buffer.split("\n\n");
+              buffer = events.pop() || ""; // Keep incomplete event in buffer
+
+              for (const event of events) {
+                const lines = event.trim().split("\n");
+                let eventType = "";
+                let data = "";
+                for (const line of lines) {
+                  if (line.startsWith("event: ")) eventType = line.slice(7);
+                  else if (line.startsWith("data: ")) data = line.slice(6);
+                }
+
+                if (eventType === "progress" && data) {
+                  try {
+                    const parsed = JSON.parse(data);
+                    onProgress(parsed.step || "", parsed.progress || 0);
+                  } catch {
+                    /* skip malformed progress */
+                  }
+                } else if (eventType === "result" && data) {
+                  try {
+                    resolve(JSON.parse(data) as FullAnalysis);
+                    return; // Done!
+                  } catch (e) {
+                    reject(new Error("Failed to parse result"));
+                    return;
+                  }
+                }
+              }
+
+              return pump();
+            });
+
+          return pump();
+        })
+        .catch(reject);
+    });
+  },
+
   getStatus: (runId: string) => fetchJSON<AnalysisStatus>(`/analysis/status/${runId}`),
 
   getResult: (runId: string) => fetchJSON<FullAnalysis>(`/analysis/result/${runId}`),

@@ -121,32 +121,30 @@ class CorrelationAnalyzer:
         return result
 
     def _fetch_benchmarks(self, tickers: list[str], min_length: int) -> dict[str, pd.Series]:
-        """Fetch benchmark price series via yfinance.
+        """Fetch benchmark price series via yfinance in parallel."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        Stops early if consecutive timeouts are detected (Railway can be slow).
-        """
-        result = {}
         if not self._yf:
-            return result
+            return {}
 
-        consecutive_fails = 0
-        for t in tickers[:6]:  # Cap at 6 benchmarks
-            if consecutive_fails >= 2:
-                logger.info("Skipping remaining benchmarks after %d consecutive failures", consecutive_fails)
-                break
+        def _fetch_one(t: str) -> tuple[str, pd.Series | None]:
             try:
                 hist = self._yf.get_history(t, period="2y")
                 if hist.success and not hist.data.empty:
                     close = hist.data["Close"]
                     if isinstance(close, pd.DataFrame):
                         close = close.iloc[:, 0]
-                    result[t] = close
-                    consecutive_fails = 0
-                else:
-                    consecutive_fails += 1
+                    return (t, close)
             except Exception as e:
                 logger.debug("Failed to fetch benchmark %s: %s", t, e)
-                consecutive_fails += 1
-                continue
+            return (t, None)
+
+        result = {}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_fetch_one, t) for t in tickers[:6]]
+            for fut in as_completed(futures):
+                sym, series = fut.result()
+                if series is not None:
+                    result[sym] = series
 
         return result
