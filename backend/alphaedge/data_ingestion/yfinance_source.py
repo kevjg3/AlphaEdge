@@ -23,6 +23,25 @@ from alphaedge.data_ingestion.base import (
 )
 
 
+def _norm_div_yield(raw: Any) -> float | None:
+    """Normalize dividend yield to a 0-1 ratio.
+
+    yfinance returns ``dividendYield`` as a percentage number (e.g. 3.16 for
+    3.16%), but every other margin/yield field is a 0-1 ratio.  Normalise so
+    the rest of the codebase can use ``:.0%`` formatting consistently.
+    """
+    if raw is None:
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    # If the value looks like it's already in percentage form (>1), divide
+    if v > 1:
+        return v / 100.0
+    return v
+
+
 # Curated sector → ETF/representative peers mapping for peer selection
 _SECTOR_PEERS: dict[str, list[str]] = {
     "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "ADBE", "CRM", "ORCL", "INTC", "AMD", "AVGO", "CSCO", "IBM", "NOW", "SHOP", "SQ", "PYPL", "NFLX", "UBER", "ABNB"],
@@ -128,7 +147,7 @@ class YFinanceSource(DataSource):
             "market_cap": info.get("marketCap"),
             "enterprise_value": info.get("enterpriseValue"),
             "beta": info.get("beta"),
-            "dividend_yield": info.get("dividendYield"),
+            "dividend_yield": _norm_div_yield(info.get("dividendYield")),
             "trailing_pe": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
             "price_to_book": info.get("priceToBook"),
@@ -249,7 +268,10 @@ class YFinanceSource(DataSource):
         t = yf.Ticker(ticker)
         try:
             info = t.info
-            dy = info.get("dividendYield") or info.get("trailingAnnualDividendYield")
+            # dividendYield is in pct form (3.16 = 3.16%), normalise first
+            dy = _norm_div_yield(info.get("dividendYield"))
+            if dy is None:
+                dy = info.get("trailingAnnualDividendYield")  # already 0-1
             if dy is not None and dy > 0:
                 dy = float(dy)
                 if dy > 0.20:

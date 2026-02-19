@@ -1,4 +1,4 @@
-"""Generate professional PPTX pitch decks from analysis results."""
+"""Generate professional PPTX analysis decks from AlphaEdge results."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ OFF_WHITE = RGBColor(0xE2, 0xE8, 0xF0)
 LIGHT_GRAY = RGBColor(0xA0, 0xAE, 0xC4)
 MID_GRAY = RGBColor(0x64, 0x74, 0x8B)
 DIM_GRAY = RGBColor(0x47, 0x55, 0x69)
-ACCENT_BLUE = RGBColor(0x63, 0x66, 0xF1)   # indigo-500
+ACCENT_BLUE = RGBColor(0x63, 0x66, 0xF1)
 ACCENT_BLUE_DIM = RGBColor(0x45, 0x48, 0xB0)
 ACCENT_GREEN = RGBColor(0x10, 0xB9, 0x81)
 ACCENT_GREEN_DIM = RGBColor(0x0D, 0x8A, 0x62)
@@ -47,7 +47,6 @@ BORDER_LIGHT = RGBColor(0x33, 0x41, 0x55)
 SLIDE_W = Inches(13.333)
 SLIDE_H = Inches(7.5)
 
-# matplotlib dark theme
 _MPL_RC = {
     "figure.facecolor": "#0B142B",
     "axes.facecolor": "#101D3A",
@@ -100,7 +99,6 @@ def _fmt_pct(n: Any, decimals: int = 1) -> str:
         return "\u2014"
     try:
         v = float(n)
-        # If already in % form (>1 or <-1 and not a ratio), display directly
         if abs(v) <= 1.0:
             return f"{v * 100:.{decimals}f}%"
         return f"{v:.{decimals}f}%"
@@ -126,15 +124,15 @@ def _fmt_price(n: Any) -> str:
         return "\u2014"
 
 
-def _pct_raw(n: Any) -> float | None:
-    """Return a percentage as a float (0-100 scale), or None."""
+def _pct_color(n: Any) -> RGBColor:
+    """Return green/red based on sign."""
     if n is None:
-        return None
+        return LIGHT_GRAY
     try:
         v = float(n)
-        return v * 100 if abs(v) <= 1.0 else v
+        return ACCENT_GREEN if v > 0 else (ACCENT_RED if v < 0 else LIGHT_GRAY)
     except (TypeError, ValueError):
-        return None
+        return LIGHT_GRAY
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +140,7 @@ def _pct_raw(n: Any) -> float | None:
 # ---------------------------------------------------------------------------
 
 class PitchDeckGenerator:
-    """Generate a PPTX pitch deck from AlphaEdge analysis results."""
+    """Generate a PPTX analysis deck from AlphaEdge results."""
 
     def __init__(self) -> None:
         self._prs: Presentation | None = None
@@ -153,23 +151,23 @@ class PitchDeckGenerator:
     # ------------------------------------------------------------------
 
     def generate(self, analysis: dict) -> BytesIO:
-        """Build pitch deck and return as in-memory bytes."""
+        """Build the deck and return as in-memory bytes."""
         self._charts_dir = tempfile.mkdtemp(prefix="alphaedge_deck_")
         try:
             self._prs = Presentation()
             self._prs.slide_width = SLIDE_W
             self._prs.slide_height = SLIDE_H
 
-            self._add_recommendation_slide(analysis)
-            self._add_business_overview_slide(analysis)
-            self._add_financial_summary_slide(analysis)
-            self._add_industry_slide(analysis)
-            self._add_why_mispriced_slide(analysis)
-            self._add_thesis_slides(analysis)
-            self._add_downside_slide(analysis)
-            self._add_valuation_slide(analysis)
-            self._add_risks_slide(analysis)
-            self._add_conclusion_slide(analysis)
+            self._add_executive_summary(analysis)    # 1
+            self._add_company_overview(analysis)      # 2
+            self._add_financial_summary(analysis)     # 3
+            self._add_valuation(analysis)             # 4
+            self._add_peer_comparison(analysis)       # 5
+            self._add_market_sentiment(analysis)      # 6
+            self._add_risk_assessment(analysis)       # 7
+            self._add_forecast_outlook(analysis)      # 8
+            self._add_strengths_risks(analysis)       # 9
+            self._add_conclusion(analysis)            # 10
 
             buf = BytesIO()
             self._prs.save(buf)
@@ -183,7 +181,7 @@ class PitchDeckGenerator:
     # ------------------------------------------------------------------
 
     def _blank_slide(self):
-        layout = self._prs.slide_layouts[6]  # blank
+        layout = self._prs.slide_layouts[6]
         slide = self._prs.slides.add_slide(layout)
         bg = slide.background.fill
         bg.solid()
@@ -191,20 +189,18 @@ class PitchDeckGenerator:
         return slide
 
     def _title_bar(self, slide, text: str, subtitle: str = ""):
-        """Accent title bar at the top with optional subtitle."""
-        # accent line
         ln = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(0.6), Inches(0.45), Inches(0.08), Inches(0.35),
+            MSO_SHAPE.RECTANGLE, Inches(0.6), Inches(0.45),
+            Inches(0.08), Inches(0.35),
         )
         ln.fill.solid()
         ln.fill.fore_color.rgb = ACCENT_BLUE
         ln.line.fill.background()
-        # title text
-        self._text_box(slide, Inches(0.9), Inches(0.35), Inches(10), Inches(0.55),
-                       text, size=24, bold=True, color=WHITE)
+        self._text_box(slide, Inches(0.9), Inches(0.35), Inches(10),
+                       Inches(0.55), text, size=24, bold=True, color=WHITE)
         if subtitle:
-            self._text_box(slide, Inches(0.9), Inches(0.78), Inches(10), Inches(0.35),
-                           subtitle, size=11, color=MID_GRAY)
+            self._text_box(slide, Inches(0.9), Inches(0.78), Inches(10),
+                           Inches(0.35), subtitle, size=11, color=MID_GRAY)
 
     def _text_box(self, slide, left, top, width, height, text: str, *,
                   size: int = 14, bold: bool = False, color=LIGHT_GRAY,
@@ -224,20 +220,13 @@ class PitchDeckGenerator:
             p.line_spacing = Pt(line_spacing)
         return txbox
 
-    def _rich_text_box(self, slide, left, top, width, height, paragraphs: list[dict]):
-        """Add a text box with multiple styled paragraphs.
-
-        Each paragraph dict: {text, size, bold, color, spacing_after, bullet}
-        """
+    def _rich_text_box(self, slide, left, top, width, height,
+                       paragraphs: list[dict]):
         txbox = slide.shapes.add_textbox(left, top, width, height)
         tf = txbox.text_frame
         tf.word_wrap = True
-
         for i, para in enumerate(paragraphs):
-            if i == 0:
-                p = tf.paragraphs[0]
-            else:
-                p = tf.add_paragraph()
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.text = para.get("text", "")
             p.font.size = Pt(para.get("size", 12))
             p.font.bold = para.get("bold", False)
@@ -252,9 +241,8 @@ class PitchDeckGenerator:
 
     def _panel(self, slide, left, top, width, height, *, fill=DARK_PANEL,
                border=BORDER_COLOR, radius=True):
-        """Add a rounded rectangle panel/card background."""
-        shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE
-        box = slide.shapes.add_shape(shape_type, left, top, width, height)
+        st = MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE
+        box = slide.shapes.add_shape(st, left, top, width, height)
         box.fill.solid()
         box.fill.fore_color.rgb = fill
         box.line.color.rgb = border
@@ -262,12 +250,11 @@ class PitchDeckGenerator:
         return box
 
     def _section_header(self, slide, left, top, text: str, width=Inches(12)):
-        """Small uppercase section header with accent underline."""
         self._text_box(slide, left, top, width, Inches(0.25),
                        text.upper(), size=9, bold=True, color=MID_GRAY)
-        # thin underline
         ln = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, left, top + Inches(0.28), Inches(1.2), Pt(1.5),
+            MSO_SHAPE.RECTANGLE, left, top + Inches(0.28),
+            Inches(1.2), Pt(1.5),
         )
         ln.fill.solid()
         ln.fill.fore_color.rgb = ACCENT_BLUE_DIM
@@ -277,17 +264,13 @@ class PitchDeckGenerator:
                      width=Inches(2.4), height=Inches(0.9), *,
                      value_color=WHITE, label_color=MID_GRAY,
                      subtitle: str = "", subtitle_color=DIM_GRAY):
-        """Render a metric card with label, value, and optional subtitle."""
         self._panel(slide, left, top, width, height)
-        # label
         self._text_box(slide, left + Inches(0.15), top + Inches(0.08),
                        width - Inches(0.3), Inches(0.22),
                        label.upper(), size=8, bold=True, color=label_color)
-        # value
         self._text_box(slide, left + Inches(0.15), top + Inches(0.3),
                        width - Inches(0.3), Inches(0.35),
                        value, size=18, bold=True, color=value_color)
-        # subtitle
         if subtitle:
             self._text_box(slide, left + Inches(0.15), top + Inches(0.65),
                            width - Inches(0.3), Inches(0.2),
@@ -296,7 +279,6 @@ class PitchDeckGenerator:
     def _large_metric_card(self, slide, left, top, label: str, value: str,
                            width=Inches(3.5), height=Inches(1.4), *,
                            value_color=WHITE, description: str = ""):
-        """Larger metric card for hero numbers."""
         self._panel(slide, left, top, width, height)
         self._text_box(slide, left + Inches(0.2), top + Inches(0.1),
                        width - Inches(0.4), Inches(0.25),
@@ -309,23 +291,7 @@ class PitchDeckGenerator:
                            width - Inches(0.4), Inches(0.3),
                            description, size=9, color=LIGHT_GRAY)
 
-    def _bullet_list(self, slide, left, top, width, height, items: list[str], *,
-                     size: int = 12, color=LIGHT_GRAY, spacing: int = 8,
-                     bullet: str = "\u25B8"):
-        """Render a bullet list with consistent styling."""
-        paras = []
-        for item in items:
-            paras.append({
-                "text": f"{bullet}  {item}",
-                "size": size,
-                "color": color,
-                "spacing_after": spacing,
-            })
-        if paras:
-            self._rich_text_box(slide, left, top, width, height, paras)
-
     def _footer(self, slide, ticker: str = ""):
-        """Footer with branding and disclaimer."""
         self._text_box(
             slide, Inches(0.6), Inches(6.95), Inches(6), Inches(0.35),
             "AlphaEdge Analysis Platform  \u2022  For informational purposes only",
@@ -337,7 +303,8 @@ class PitchDeckGenerator:
                 ticker, size=7, color=MID_GRAY, align=PP_ALIGN.RIGHT,
             )
 
-    def _add_picture(self, slide, path: str, left, top, width=None, height=None):
+    def _add_picture(self, slide, path: str, left, top, width=None,
+                     height=None):
         kwargs = {"left": left, "top": top}
         if width:
             kwargs["width"] = width
@@ -347,205 +314,207 @@ class PitchDeckGenerator:
 
     def _divider(self, slide, top):
         ln = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(0.6), top, Inches(12.13), Pt(1),
+            MSO_SHAPE.RECTANGLE, Inches(0.6), top,
+            Inches(12.13), Pt(1),
         )
         ln.fill.solid()
         ln.fill.fore_color.rgb = BORDER_COLOR
         ln.line.fill.background()
 
-    def _side_accent(self, slide, top, height, color=ACCENT_BLUE):
-        """Vertical accent bar on the left side of a content section."""
-        bar = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(0.6), top, Inches(0.06), height,
-        )
-        bar.fill.solid()
-        bar.fill.fore_color.rgb = color
-        bar.line.fill.background()
+    def _data_row(self, slide, x, y, label: str, value: str, w_label=Inches(2.5),
+                  w_value=Inches(1.5), *, value_color=WHITE, label_size=10,
+                  value_size=12, bg: RGBColor | None = None):
+        """Render a label-value data row, optionally with a background."""
+        total_w = w_label + w_value + Inches(0.3)
+        if bg:
+            stripe = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, x, y, total_w, Inches(0.42),
+            )
+            stripe.fill.solid()
+            stripe.fill.fore_color.rgb = bg
+            stripe.line.fill.background()
+        self._text_box(slide, x + Inches(0.1), y + Inches(0.06),
+                       w_label, Inches(0.3), label,
+                       size=label_size, color=MID_GRAY)
+        self._text_box(slide, x + w_label + Inches(0.1), y + Inches(0.06),
+                       w_value, Inches(0.3), value,
+                       size=value_size, bold=True, color=value_color,
+                       align=PP_ALIGN.RIGHT)
 
     # ------------------------------------------------------------------
-    # SLIDE 1: Recommendation
+    # SLIDE 1 — Executive Summary
     # ------------------------------------------------------------------
 
-    def _add_recommendation_slide(self, analysis: dict):
+    def _add_executive_summary(self, a: dict):
         slide = self._blank_slide()
-        snap = analysis.get("snapshot") or {}
-        fund = analysis.get("fundamentals") or {}
-        verdict = _sg(fund, "verdict") or {}
-        thesis = _sg(fund, "investment_thesis") or {}
+        snap = a.get("snapshot") or {}
+        fund = a.get("fundamentals") or {}
+        verdict = fund.get("verdict") or {}
+        thesis = fund.get("investment_thesis") or {}
         combined = fund.get("combined_range") or {}
-        forecast = analysis.get("forecast") or {}
 
-        name = snap.get("name", analysis.get("ticker", ""))
-        ticker = snap.get("ticker", analysis.get("ticker", ""))
+        name = snap.get("name", a.get("ticker", ""))
+        ticker = snap.get("ticker", a.get("ticker", ""))
         price = snap.get("price")
         label = verdict.get("label", "")
         upside = verdict.get("upside_pct")
         fair_mid = verdict.get("fair_value_mid")
         fair_low = combined.get("low")
         fair_high = combined.get("high")
+        change_pct = snap.get("change_1d_pct")
 
         is_long = label in ("undervalued", "fairly_valued")
-        rec_text = "LONG" if is_long else "SHORT"
+        rec_text = "BUY" if label == "undervalued" else ("HOLD" if label == "fairly_valued" else "SELL")
         rec_color = ACCENT_GREEN if is_long else ACCENT_RED
 
-        # Top-left: Recommendation badge
+        # Verdict badge
         badge = slide.shapes.add_shape(
             MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(0.8), Inches(2.4), Inches(0.75),
+            Inches(0.8), Inches(0.7), Inches(1.6), Inches(0.6),
         )
         badge.fill.solid()
         badge.fill.fore_color.rgb = rec_color
         badge.line.fill.background()
         tf = badge.text_frame
-        tf.word_wrap = False
         p = tf.paragraphs[0]
         p.text = rec_text
-        p.font.size = Pt(30)
+        p.font.size = Pt(24)
         p.font.bold = True
         p.font.color.rgb = WHITE
         p.font.name = "Calibri"
         p.alignment = PP_ALIGN.CENTER
-        tf.paragraphs[0].space_before = Pt(4)
+        tf.paragraphs[0].space_before = Pt(3)
 
-        # Top-right: Sector tag
+        # Company + sector line
         sector = snap.get("sector", "")
         industry = snap.get("industry", "")
-        if sector or industry:
-            tag_text = f"{sector}  \u2022  {industry}" if sector and industry else (sector or industry)
-            self._text_box(slide, Inches(7), Inches(0.9), Inches(5.8), Inches(0.35),
-                           tag_text, size=11, color=MID_GRAY, align=PP_ALIGN.RIGHT)
-
-        # Company name + ticker (large)
-        self._text_box(slide, Inches(0.8), Inches(1.9), Inches(11.5), Inches(0.8),
-                       f"{name} ({ticker})", size=38, bold=True, color=WHITE)
-
-        # Key metrics row — 4 large cards
-        y = Inches(3.0)
-        card_w = Inches(2.8)
-        gap = Inches(0.25)
-        x = Inches(0.8)
-
+        sector_str = f"  |  {sector} \u2014 {industry}" if sector else ""
+        self._text_box(slide, Inches(2.7), Inches(0.7), Inches(10), Inches(0.45),
+                       f"{name} ({ticker}){sector_str}",
+                       size=22, bold=True, color=WHITE)
+        # Subtitle
+        sub_parts = []
         if price is not None:
-            change = snap.get("change_1d_pct")
-            chg_str = f"{change:+.2f}% today" if change else ""
-            self._large_metric_card(slide, x, y, "Current Price",
-                                    _fmt_price(price), value_color=WHITE,
-                                    description=chg_str)
-        x += card_w + gap
+            chg = f" ({change_pct:+.2f}%)" if change_pct else ""
+            sub_parts.append(f"Price: {_fmt_price(price)}{chg}")
         if fair_mid is not None:
-            self._large_metric_card(slide, x, y, "Price Target",
-                                    _fmt_price(fair_mid), value_color=rec_color,
-                                    description=f"Range: {_fmt_price(fair_low)} \u2013 {_fmt_price(fair_high)}" if fair_low and fair_high else "")
-        x += card_w + gap
+            sub_parts.append(f"Fair Value: {_fmt_price(fair_mid)}")
         if upside is not None:
-            sign = "+" if upside > 0 else ""
-            self._large_metric_card(slide, x, y, "Implied Upside",
-                                    f"{sign}{upside:.1f}%",
-                                    value_color=ACCENT_GREEN if upside > 0 else ACCENT_RED,
-                                    description="Based on blended DCF + comps valuation")
-        x += card_w + gap
-        # 4th card: Market cap
-        mcap = snap.get("market_cap")
-        pe = snap.get("pe_ratio")
-        if mcap:
-            self._large_metric_card(slide, x, y, "Market Cap",
-                                    _fmt_large(mcap), value_color=WHITE,
-                                    description=f"P/E: {_fmt_ratio(pe)}" if pe else "")
+            sub_parts.append(f"Upside: {upside:+.1f}%")
+        if sub_parts:
+            self._text_box(slide, Inches(2.7), Inches(1.1), Inches(10), Inches(0.3),
+                           "  \u2022  ".join(sub_parts), size=13, color=LIGHT_GRAY)
 
-        # Investment thesis paragraph (larger, more detailed)
+        # Key metrics row (5 cards)
+        y = Inches(1.8)
+        cw = Inches(2.35)
+        cg = Inches(0.15)
+        metrics = [
+            ("Market Cap", _fmt_large(snap.get("market_cap")), WHITE),
+            ("P/E Ratio", _fmt_ratio(snap.get("pe_ratio")), WHITE),
+            ("Revenue", _fmt_large(snap.get("total_revenue")), WHITE),
+            ("Operating Margin", _fmt_pct(snap.get("operating_margins")), WHITE),
+            ("Free Cash Flow", _fmt_large(snap.get("free_cashflow")), WHITE),
+        ]
+        for i, (ml, mv, mc) in enumerate(metrics):
+            self._metric_card(slide, Inches(0.8) + i * (cw + cg), y,
+                              ml, mv, width=cw, height=Inches(0.85),
+                              value_color=mc)
+
+        # Investment thesis overview (full-width panel)
         thesis_text = thesis.get("investment_thesis", "")
         if thesis_text:
-            # Use more of the text (up to ~450 chars)
-            display_text = thesis_text if len(thesis_text) <= 450 else thesis_text[:447] + "..."
-            self._panel(slide, Inches(0.8), Inches(4.7), Inches(11.6), Inches(1.8),
+            display = thesis_text if len(thesis_text) <= 550 else thesis_text[:547] + "..."
+            self._panel(slide, Inches(0.7), Inches(3.0), Inches(11.9), Inches(2.0),
                         fill=DARK_PANEL, border=BORDER_LIGHT)
-            self._text_box(slide, Inches(1.0), Inches(4.8), Inches(1.5), Inches(0.25),
-                           "INVESTMENT THESIS", size=8, bold=True, color=ACCENT_BLUE)
-            self._text_box(slide, Inches(1.0), Inches(5.1), Inches(11.2), Inches(1.3),
-                           display_text, size=13, color=OFF_WHITE, line_spacing=18)
+            self._text_box(slide, Inches(0.9), Inches(3.1), Inches(2), Inches(0.25),
+                           "INVESTMENT OVERVIEW", size=8, bold=True, color=ACCENT_BLUE)
+            self._text_box(slide, Inches(0.9), Inches(3.4), Inches(11.5), Inches(1.5),
+                           display, size=13, color=OFF_WHITE, line_spacing=19)
+
+        # Fair value range chart (bottom)
+        chart_path = self._create_fair_value_chart(price, fair_low, fair_mid, fair_high)
+        if chart_path:
+            self._add_picture(slide, chart_path, Inches(0.5), Inches(5.2),
+                              width=Inches(12.3), height=Inches(1.6))
 
         self._footer(slide, ticker)
 
     # ------------------------------------------------------------------
-    # SLIDE 2: Business Overview
+    # SLIDE 2 — Company Overview
     # ------------------------------------------------------------------
 
-    def _add_business_overview_slide(self, analysis: dict):
+    def _add_company_overview(self, a: dict):
         slide = self._blank_slide()
-        self._title_bar(slide, "Business Overview")
+        self._title_bar(slide, "Company Overview")
 
-        snap = analysis.get("snapshot") or {}
-        thesis = _sg(analysis, "fundamentals", "investment_thesis") or {}
-        fh = _sg(analysis, "fundamentals", "financial_health") or {}
+        snap = a.get("snapshot") or {}
+        thesis = _sg(a, "fundamentals", "investment_thesis") or {}
+        fh = _sg(a, "fundamentals", "financial_health") or {}
         income = fh.get("income_summary") or {}
 
-        # Left column — company description (expanded)
+        # Left: description in panel
         overview = thesis.get("company_overview", snap.get("description", ""))
         if overview:
-            display_text = overview if len(overview) <= 900 else overview[:897] + "..."
-            # Panel background for text
-            self._panel(slide, Inches(0.5), Inches(1.15), Inches(7.0), Inches(3.6),
+            disp = overview if len(overview) <= 950 else overview[:947] + "..."
+            self._panel(slide, Inches(0.5), Inches(1.15), Inches(7.3), Inches(4.2),
                         fill=DARK_PANEL, border=BORDER_COLOR)
-            self._text_box(slide, Inches(0.7), Inches(1.25), Inches(1.5), Inches(0.25),
-                           "COMPANY DESCRIPTION", size=8, bold=True, color=ACCENT_BLUE)
-            self._text_box(slide, Inches(0.7), Inches(1.55), Inches(6.6), Inches(3.0),
-                           display_text, size=12, color=OFF_WHITE, line_spacing=17)
+            self._text_box(slide, Inches(0.7), Inches(1.25), Inches(2), Inches(0.25),
+                           "BUSINESS DESCRIPTION", size=8, bold=True, color=ACCENT_BLUE)
+            self._text_box(slide, Inches(0.7), Inches(1.55), Inches(6.9), Inches(3.6),
+                           disp, size=12, color=OFF_WHITE, line_spacing=17)
 
-        # Right column — key stats grid (3x3)
-        x_base = Inches(7.8)
-        y_base = Inches(1.15)
-        cw = Inches(1.7)
-        ch = Inches(1.05)
-        gap_x = Inches(0.1)
-        gap_y = Inches(0.1)
+        # Right: stat grid
+        x0 = Inches(8.1)
+        y0 = Inches(1.15)
+        cw = Inches(2.45)
+        ch = Inches(0.95)
+        gx = Inches(0.1)
+        gy = Inches(0.1)
 
         stats = [
             ("Market Cap", _fmt_large(snap.get("market_cap")), WHITE),
             ("Revenue", _fmt_large(snap.get("total_revenue")), WHITE),
-            ("Net Income", _fmt_large(income.get("net_income")), WHITE),
-            ("Rev Growth", _fmt_pct(snap.get("revenue_growth")), ACCENT_GREEN if _pct_raw(snap.get("revenue_growth")) and _pct_raw(snap.get("revenue_growth")) > 0 else ACCENT_RED),
+            ("Rev Growth", _fmt_pct(snap.get("revenue_growth")), _pct_color(snap.get("revenue_growth"))),
             ("Op Margin", _fmt_pct(snap.get("operating_margins")), WHITE),
-            ("Profit Margin", _fmt_pct(snap.get("profit_margins")), WHITE),
             ("P/E Ratio", _fmt_ratio(snap.get("pe_ratio")), WHITE),
+            ("Forward P/E", _fmt_ratio(snap.get("forward_pe")), WHITE),
             ("ROE", _fmt_pct(snap.get("return_on_equity")), WHITE),
+            ("Div Yield", _fmt_pct(snap.get("dividend_yield")), WHITE),
+            ("Beta", _fmt_ratio(snap.get("beta")), WHITE),
             ("Employees", f"{snap.get('employees', 0):,}" if snap.get("employees") else "\u2014", WHITE),
         ]
+        for i, (lbl, val, vc) in enumerate(stats):
+            row, col = divmod(i, 2)
+            self._metric_card(slide, x0 + col * (cw + gx), y0 + row * (ch + gy),
+                              lbl, val, width=cw, height=ch, value_color=vc)
 
-        for i, (label, value, vc) in enumerate(stats):
-            row = i // 3
-            col = i % 3
-            cx = x_base + col * (cw + gap_x)
-            cy = y_base + row * (ch + gap_y)
-            self._metric_card(slide, cx, cy, label, str(value),
-                              width=cw, height=ch, value_color=vc)
-
-        # Bottom section — Key competitive advantages from strengths
+        # Bottom: key strengths
         strengths = thesis.get("strengths", [])
         if strengths:
-            self._divider(slide, Inches(5.0))
-            self._section_header(slide, Inches(0.6), Inches(5.2), "Key Strengths")
-            # Show up to 3 strengths with bullet points
-            bullet_items = [s for s in strengths[:3]]
-            self._bullet_list(slide, Inches(0.8), Inches(5.6), Inches(12), Inches(1.2),
-                              bullet_items, size=12, color=OFF_WHITE, spacing=6)
+            self._divider(slide, Inches(5.55))
+            self._section_header(slide, Inches(0.6), Inches(5.7), "Key Strengths")
+            paras = [{"text": f"\u25B8  {s}", "size": 11, "color": OFF_WHITE,
+                       "spacing_after": 6} for s in strengths[:3]]
+            self._rich_text_box(slide, Inches(0.8), Inches(6.05), Inches(12), Inches(0.8),
+                                paras)
 
         self._footer(slide, snap.get("ticker", ""))
 
     # ------------------------------------------------------------------
-    # SLIDE 3: Financial Summary
+    # SLIDE 3 — Financial Summary
     # ------------------------------------------------------------------
 
-    def _add_financial_summary_slide(self, analysis: dict):
+    def _add_financial_summary(self, a: dict):
         slide = self._blank_slide()
         self._title_bar(slide, "Financial Summary",
                         subtitle="Key financial metrics from the latest filings")
 
-        fh = _sg(analysis, "fundamentals", "financial_health") or {}
+        fh = _sg(a, "fundamentals", "financial_health") or {}
         income = fh.get("income_summary") or {}
         balance = fh.get("balance_summary") or {}
         cashflow = fh.get("cashflow_summary") or {}
-        quality = fh.get("quality_scores") or {}
-        snap = analysis.get("snapshot") or {}
+        snap = a.get("snapshot") or {}
 
         col_w = Inches(3.8)
         col_gap = Inches(0.35)
@@ -583,7 +552,6 @@ class PitchDeckGenerator:
 
         for ci, (col_title, items) in enumerate(columns):
             x = Inches(0.6) + ci * (col_w + col_gap)
-            # Column header
             hdr = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE, x, y_start, col_w, Inches(0.4),
             )
@@ -594,140 +562,249 @@ class PitchDeckGenerator:
                            col_w - Inches(0.3), Inches(0.35),
                            col_title, size=11, bold=True, color=WHITE)
 
-            # Rows
             for ri, (label, value) in enumerate(items):
                 ry = y_start + Inches(0.5) + ri * Inches(0.65)
-                # background stripe
-                stripe = slide.shapes.add_shape(
-                    MSO_SHAPE.RECTANGLE, x, ry, col_w, Inches(0.58),
-                )
-                stripe.fill.solid()
-                stripe.fill.fore_color.rgb = DARK_PANEL if ri % 2 == 0 else NAVY
-                stripe.line.fill.background()
-
-                self._text_box(slide, x + Inches(0.15), ry + Inches(0.08),
-                               Inches(2.0), Inches(0.42),
-                               label, size=10, color=MID_GRAY)
-                # Color-code certain values
-                v_color = WHITE
-                if "growth" in label.lower() or "margin" in label.lower() or "yield" in label.lower():
-                    raw = _pct_raw(dict(items).get(label.replace("Revenue Growth YoY", "revenue_growth_yoy")))
-                    # Just keep white for simplicity — the value speaks for itself
-                self._text_box(slide, x + Inches(2.1), ry + Inches(0.08),
-                               Inches(1.5), Inches(0.42),
-                               value, size=12, bold=True, color=v_color, align=PP_ALIGN.RIGHT)
-
-        # Quality scores at bottom if available
-        accruals = quality.get("accruals_ratio")
-        if accruals is not None:
-            self._text_box(slide, Inches(0.6), Inches(6.5), Inches(8), Inches(0.3),
-                           f"Accruals Ratio: {_fmt_ratio(accruals)}  \u2022  "
-                           f"Revenue Growth Std: {_fmt_pct(quality.get('revenue_growth_std'))}",
-                           size=9, color=DIM_GRAY)
+                bg = DARK_PANEL if ri % 2 == 0 else NAVY
+                self._data_row(slide, x, ry, label, value,
+                               w_label=Inches(2.1), w_value=Inches(1.4),
+                               bg=bg)
 
         self._footer(slide, snap.get("ticker", ""))
 
     # ------------------------------------------------------------------
-    # SLIDE 4: Industry & Competitive Position
+    # SLIDE 4 — Valuation Analysis
     # ------------------------------------------------------------------
 
-    def _add_industry_slide(self, analysis: dict):
+    def _add_valuation(self, a: dict):
         slide = self._blank_slide()
-        self._title_bar(slide, "Industry & Competitive Position")
+        self._title_bar(slide, "Valuation Analysis",
+                        subtitle="DCF and comparable company analysis")
 
-        fund = analysis.get("fundamentals") or {}
-        thesis = fund.get("investment_thesis") or {}
+        fund = a.get("fundamentals") or {}
+        dcf = fund.get("dcf_valuation") or {}
         comps = fund.get("comps_valuation") or {}
-        snap = analysis.get("snapshot") or {}
+        combined = fund.get("combined_range") or {}
+        snap = a.get("snapshot") or {}
+        price = snap.get("price")
 
-        # Left — industry analysis text (expanded with panel)
-        ind_text = thesis.get("industry_analysis", "")
-        if ind_text:
-            display_text = ind_text if len(ind_text) <= 800 else ind_text[:797] + "..."
-            self._panel(slide, Inches(0.5), Inches(1.1), Inches(6.5), Inches(3.5),
-                        fill=DARK_PANEL, border=BORDER_COLOR)
-            self._text_box(slide, Inches(0.7), Inches(1.2), Inches(2), Inches(0.25),
-                           "INDUSTRY ANALYSIS", size=8, bold=True, color=ACCENT_BLUE)
-            self._text_box(slide, Inches(0.7), Inches(1.5), Inches(6.1), Inches(2.9),
-                           display_text, size=12, color=OFF_WHITE, line_spacing=17)
-        else:
-            # Fallback: show sector/industry info
-            sector = snap.get("sector", "")
-            industry = snap.get("industry", "")
-            if sector or industry:
-                self._panel(slide, Inches(0.5), Inches(1.1), Inches(6.5), Inches(2.0),
-                            fill=DARK_PANEL, border=BORDER_COLOR)
-                self._text_box(slide, Inches(0.7), Inches(1.3), Inches(6.1), Inches(0.5),
-                               f"Sector: {sector}", size=16, bold=True, color=WHITE)
-                self._text_box(slide, Inches(0.7), Inches(1.9), Inches(6.1), Inches(0.5),
-                               f"Industry: {industry}", size=14, color=LIGHT_GRAY)
+        # --- DCF panel (left) ---
+        pw = Inches(6.2)
+        self._panel(slide, Inches(0.5), Inches(1.15), pw, Inches(2.4),
+                    fill=DARK_PANEL, border=BORDER_COLOR)
+        self._text_box(slide, Inches(0.7), Inches(1.25), Inches(3), Inches(0.25),
+                       "DCF VALUATION", size=8, bold=True, color=ACCENT_BLUE)
 
-        # Right — peer comparison chart
+        dcf_cards = [
+            ("Implied Price", _fmt_price(dcf.get("implied_price")), ACCENT_GREEN),
+            ("Enterprise Value", _fmt_large(dcf.get("enterprise_value")), WHITE),
+            ("Equity Value", _fmt_large(dcf.get("equity_value")), WHITE),
+        ]
+        for di, (lbl, val, vc) in enumerate(dcf_cards):
+            self._metric_card(slide, Inches(0.7) + di * Inches(1.85),
+                              Inches(1.6), lbl, val,
+                              width=Inches(1.75), height=Inches(0.8),
+                              value_color=vc)
+
+        assumptions = dcf.get("assumptions_used") or {}
+        parts = []
+        for key, lbl in [("wacc", "WACC"), ("terminal_growth_rate", "Terminal Growth"),
+                         ("operating_margin", "Op Margin"), ("tax_rate", "Tax Rate")]:
+            v = assumptions.get(key)
+            if v:
+                parts.append(f"{lbl}: {_fmt_pct(v)}")
+        proj_y = assumptions.get("projection_years")
+        if proj_y:
+            parts.append(f"{proj_y}yr horizon")
+        if parts:
+            self._text_box(slide, Inches(0.7), Inches(2.6), Inches(5.8), Inches(0.4),
+                           "   \u2022   ".join(parts), size=9, color=LIGHT_GRAY)
+
+        dcf_upside = dcf.get("upside_downside_pct")
+        if dcf_upside is not None:
+            try:
+                uv = float(dcf_upside)
+                uc = ACCENT_GREEN if uv > 0 else ACCENT_RED
+                self._text_box(slide, Inches(0.7), Inches(3.05), Inches(5.8), Inches(0.25),
+                               f"DCF implies {uv:+.1f}% {'upside' if uv > 0 else 'downside'} from current price",
+                               size=11, bold=True, color=uc)
+            except (TypeError, ValueError):
+                pass
+
+        # --- Comps panel (right) ---
+        cx = Inches(6.9)
+        cw = Inches(5.9)
+        self._panel(slide, cx, Inches(1.15), cw, Inches(2.4),
+                    fill=DARK_PANEL, border=BORDER_COLOR)
+        self._text_box(slide, cx + Inches(0.2), Inches(1.25), Inches(4), Inches(0.25),
+                       "COMPARABLE COMPANIES", size=8, bold=True, color=ACCENT_BLUE)
+
+        val_range = comps.get("valuation_range") or {}
+        approaches = [
+            ("P/E Approach", val_range.get("pe_approach") or {}),
+            ("EV/EBITDA Approach", val_range.get("ev_ebitda_approach") or {}),
+            ("EV/Revenue Approach", val_range.get("ev_revenue_approach") or {}),
+        ]
+        for ai, (approach_name, approach_data) in enumerate(approaches):
+            ay = Inches(1.65) + ai * Inches(0.6)
+            implied = approach_data.get("implied_value") or approach_data.get("implied_market_cap")
+            upside = approach_data.get("implied_upside")
+
+            self._text_box(slide, cx + Inches(0.2), ay, Inches(2.2), Inches(0.3),
+                           approach_name, size=11, color=LIGHT_GRAY)
+            self._text_box(slide, cx + Inches(2.5), ay, Inches(1.5), Inches(0.3),
+                           _fmt_large(implied), size=12, bold=True, color=WHITE,
+                           align=PP_ALIGN.RIGHT)
+            if upside is not None:
+                try:
+                    uv = float(upside)
+                    self._text_box(slide, cx + Inches(4.2), ay, Inches(1.2), Inches(0.3),
+                                   f"{uv:+.1f}%", size=11, bold=True,
+                                   color=ACCENT_GREEN if uv > 0 else ACCENT_RED,
+                                   align=PP_ALIGN.RIGHT)
+                except (TypeError, ValueError):
+                    pass
+
+        peer_count = comps.get("peer_count")
+        if peer_count:
+            self._text_box(slide, cx + Inches(0.2), Inches(3.25), Inches(5), Inches(0.2),
+                           f"Based on {peer_count} comparable companies",
+                           size=9, color=DIM_GRAY)
+
+        # --- Bottom: Sensitivity + Range ---
+        self._divider(slide, Inches(3.7))
+
+        heatmap_path = self._create_sensitivity_heatmap(dcf, price)
+        if heatmap_path:
+            self._add_picture(slide, heatmap_path, Inches(0.3), Inches(3.9),
+                              width=Inches(6.8), height=Inches(3.0))
+
+        range_path = self._create_range_chart(combined, price)
+        if range_path:
+            self._add_picture(slide, range_path, Inches(7.2), Inches(3.9),
+                              width=Inches(5.5), height=Inches(1.5))
+
+        if combined:
+            mw = combined.get("methodology_weights") or {}
+            y_r = Inches(5.6)
+            self._metric_card(slide, Inches(7.2), y_r, "Bear Case",
+                              _fmt_price(combined.get("low")),
+                              width=Inches(1.7), height=Inches(0.9),
+                              value_color=ACCENT_RED, subtitle="Downside scenario")
+            self._metric_card(slide, Inches(9.1), y_r, "Base Case",
+                              _fmt_price(combined.get("mid")),
+                              width=Inches(1.7), height=Inches(0.9),
+                              value_color=ACCENT_BLUE, subtitle="Most likely")
+            self._metric_card(slide, Inches(11.0), y_r, "Bull Case",
+                              _fmt_price(combined.get("high")),
+                              width=Inches(1.7), height=Inches(0.9),
+                              value_color=ACCENT_GREEN, subtitle="Upside scenario")
+
+            dcf_w = mw.get("dcf")
+            comp_w = mw.get("comps")
+            if dcf_w and comp_w:
+                self._text_box(slide, Inches(7.2), Inches(6.55), Inches(5.5), Inches(0.2),
+                               f"Blended: {dcf_w*100:.0f}% DCF + {comp_w*100:.0f}% Comps",
+                               size=8, color=DIM_GRAY, align=PP_ALIGN.CENTER)
+
+        self._footer(slide, snap.get("ticker", ""))
+
+    # ------------------------------------------------------------------
+    # SLIDE 5 — Peer Comparison
+    # ------------------------------------------------------------------
+
+    def _add_peer_comparison(self, a: dict):
+        slide = self._blank_slide()
+        self._title_bar(slide, "Peer Comparison",
+                        subtitle="Key metrics relative to comparable companies")
+
+        comps = _sg(a, "fundamentals", "comps_valuation") or {}
+        snap = a.get("snapshot") or {}
+
+        # Peer chart (left)
         chart_path = self._create_peer_chart(comps, snap)
         if chart_path:
-            self._add_picture(slide, chart_path, Inches(7.2), Inches(1.0),
-                              width=Inches(5.8), height=Inches(3.5))
+            self._add_picture(slide, chart_path, Inches(0.3), Inches(1.1),
+                              width=Inches(6.5), height=Inches(4.0))
 
-        # Bottom — percentile rank badges (wider, with labels)
+        # Percentile rank cards (right)
         pct_rank = comps.get("percentile_rank") or {}
         if pct_rank:
-            self._divider(slide, Inches(4.8))
-            self._section_header(slide, Inches(0.6), Inches(4.95), "Percentile Rank vs Peers")
-            bx = Inches(0.6)
-            by = Inches(5.4)
-            badge_w = Inches(1.5)
-            badge_h = Inches(0.85)
-            for metric, pctile in list(pct_rank.items())[:8]:
+            self._section_header(slide, Inches(7.2), Inches(1.1), "Percentile Rank vs Peers")
+            bw = Inches(2.7)
+            bh = Inches(0.9)
+            bg = Inches(0.15)
+            bx = Inches(7.2)
+            by = Inches(1.55)
+            for i, (metric, pctile) in enumerate(list(pct_rank.items())[:8]):
                 try:
                     pval = float(pctile)
                 except (TypeError, ValueError):
                     continue
-                color = ACCENT_GREEN if pval >= 60 else (ACCENT_RED if pval <= 30 else LIGHT_GRAY)
+                color = ACCENT_GREEN if pval >= 60 else (ACCENT_RED if pval <= 30 else WHITE)
                 label_clean = metric.replace("_", " ").title()
-                # Contextual subtitle
-                ctx = "Top quartile" if pval >= 75 else ("Above median" if pval >= 50 else ("Below median" if pval >= 25 else "Bottom quartile"))
-                self._metric_card(slide, bx, by, label_clean, f"{pval:.0f}th",
-                                  width=badge_w, height=badge_h, value_color=color,
-                                  subtitle=ctx, subtitle_color=DIM_GRAY)
-                bx += badge_w + Inches(0.1)
+                ctx = ("Top quartile" if pval >= 75 else
+                       "Above median" if pval >= 50 else
+                       "Below median" if pval >= 25 else "Bottom quartile")
+                row, col = divmod(i, 2)
+                self._metric_card(
+                    slide, bx + col * (bw + bg), by + row * (bh + bg),
+                    label_clean, f"{pval:.0f}th percentile",
+                    width=bw, height=bh, value_color=color,
+                    subtitle=ctx, subtitle_color=DIM_GRAY,
+                )
+
+        # Bottom: Peer table
+        peers = comps.get("peers") or []
+        target = comps.get("target") or {}
+        if peers and target:
+            self._divider(slide, Inches(5.3))
+            self._section_header(slide, Inches(0.6), Inches(5.4), "Peer Summary")
+            headers = ["Company", "Mkt Cap", "P/E", "EV/EBITDA", "Op Margin", "ROE"]
+            hx = [Inches(0.6), Inches(3.5), Inches(5.5), Inches(7.2), Inches(9.2), Inches(11.2)]
+            hw = [Inches(2.8), Inches(1.8), Inches(1.5), Inches(1.8), Inches(1.8), Inches(1.5)]
+            for hi, h in enumerate(headers):
+                self._text_box(slide, hx[hi], Inches(5.75), hw[hi], Inches(0.2),
+                               h, size=8, bold=True, color=MID_GRAY)
+
+            all_companies = [target] + peers[:4]
+            for ci, comp in enumerate(all_companies):
+                ry = Inches(6.0) + ci * Inches(0.35)
+                is_target = ci == 0
+                bg = DARK_PANEL if ci % 2 == 0 else NAVY
+                stripe = slide.shapes.add_shape(
+                    MSO_SHAPE.RECTANGLE, Inches(0.5), ry, Inches(12.33), Inches(0.32),
+                )
+                stripe.fill.solid()
+                stripe.fill.fore_color.rgb = bg
+                stripe.line.fill.background()
+
+                txt_color = ACCENT_BLUE if is_target else OFF_WHITE
+                name = comp.get("ticker", comp.get("name", ""))
+                vals = [
+                    name + (" \u2605" if is_target else ""),
+                    _fmt_large(comp.get("market_cap")),
+                    _fmt_ratio(comp.get("pe")),
+                    _fmt_ratio(comp.get("ev_ebitda")),
+                    _fmt_pct(comp.get("operating_margin")),
+                    _fmt_pct(comp.get("roe")),
+                ]
+                for vi, v in enumerate(vals):
+                    self._text_box(slide, hx[vi], ry + Inches(0.02), hw[vi], Inches(0.26),
+                                   v, size=9, bold=is_target, color=txt_color)
 
         self._footer(slide, snap.get("ticker", ""))
 
     # ------------------------------------------------------------------
-    # SLIDE 5: Why Mispriced?
+    # SLIDE 6 — Market Sentiment
     # ------------------------------------------------------------------
 
-    def _add_why_mispriced_slide(self, analysis: dict):
+    def _add_market_sentiment(self, a: dict):
         slide = self._blank_slide()
-        self._title_bar(slide, "Why Is This Mispriced?",
-                        subtitle="Identifying the gap between market price and intrinsic value")
+        self._title_bar(slide, "Market Sentiment",
+                        subtitle="News analysis and sentiment indicators")
 
-        fund = analysis.get("fundamentals") or {}
-        verdict = fund.get("verdict") or {}
-        news = _sg(analysis, "news", "synthesis") or {}
-        thesis = fund.get("investment_thesis") or {}
-        combined = fund.get("combined_range") or {}
-        snap = analysis.get("snapshot") or {}
-
-        price = snap.get("price")
-        low = combined.get("low")
-        mid = combined.get("mid")
-        high = combined.get("high")
-
-        # Fair value range chart (full width)
-        chart_path = self._create_fair_value_chart(price, low, mid, high)
-        if chart_path:
-            self._add_picture(slide, chart_path, Inches(0.4), Inches(1.1),
-                              width=Inches(12.5), height=Inches(2.2))
-
-        # Two-column layout below chart
-        # Left column — Market Sentiment (enriched)
-        y = Inches(3.5)
-        self._panel(slide, Inches(0.5), y, Inches(6.0), Inches(3.1),
-                    fill=DARK_PANEL, border=BORDER_COLOR)
-
-        self._text_box(slide, Inches(0.7), y + Inches(0.1), Inches(3), Inches(0.25),
-                       "MARKET SENTIMENT", size=8, bold=True, color=ACCENT_BLUE)
+        news = _sg(a, "news", "synthesis") or {}
+        snap = a.get("snapshot") or {}
 
         sentiment = news.get("overall_sentiment", "")
         score = news.get("sentiment_score")
@@ -736,599 +813,457 @@ class PitchDeckGenerator:
         agg = news.get("aggregate_sentiment") or {}
         pos_pct = agg.get("positive_pct")
         neg_pct = agg.get("negative_pct")
+        neutral_pct = agg.get("neutral_pct")
         article_count = news.get("article_count")
+        themes = news.get("key_themes") or []
+        news_catalysts = news.get("catalysts") or []
+        news_risks = news.get("risks") or []
+
+        # Left panel: sentiment overview
+        self._panel(slide, Inches(0.5), Inches(1.15), Inches(6.2), Inches(5.5),
+                    fill=DARK_PANEL, border=BORDER_COLOR)
+        self._text_box(slide, Inches(0.7), Inches(1.25), Inches(3), Inches(0.25),
+                       "OVERALL SENTIMENT", size=8, bold=True, color=ACCENT_BLUE)
 
         if sentiment:
             s_color = ACCENT_GREEN if sentiment == "bullish" else (
                 ACCENT_RED if sentiment == "bearish" else LIGHT_GRAY)
-            # Sentiment + score in one line
-            score_str = f"  (score: {score:+.2f})" if score is not None else ""
-            self._text_box(slide, Inches(0.7), y + Inches(0.4), Inches(5.5), Inches(0.45),
-                           f"{sentiment.upper()}{score_str}", size=20, bold=True, color=s_color)
+            score_str = f"  ({score:+.2f})" if score is not None else ""
+            self._text_box(slide, Inches(0.7), Inches(1.6), Inches(5.5), Inches(0.5),
+                           f"{sentiment.upper()}{score_str}",
+                           size=26, bold=True, color=s_color)
 
-        # Momentum + article count
-        meta_parts = []
+        # Meta line
+        meta = []
         if momentum:
-            meta_parts.append(f"Momentum: {momentum.capitalize()}")
+            meta.append(f"Momentum: {momentum.capitalize()}")
         if article_count:
-            meta_parts.append(f"{article_count} articles analyzed")
-        if pos_pct is not None and neg_pct is not None:
-            meta_parts.append(f"{_fmt_pct(pos_pct)} positive / {_fmt_pct(neg_pct)} negative")
-        if meta_parts:
-            self._text_box(slide, Inches(0.7), y + Inches(0.9), Inches(5.5), Inches(0.35),
-                           "  \u2022  ".join(meta_parts), size=10, color=MID_GRAY)
+            meta.append(f"{article_count} articles analyzed")
+        if meta:
+            self._text_box(slide, Inches(0.7), Inches(2.15), Inches(5.5), Inches(0.3),
+                           "  \u2022  ".join(meta), size=10, color=MID_GRAY)
 
+        # Sentiment breakdown
+        if pos_pct is not None:
+            self._text_box(slide, Inches(0.7), Inches(2.55), Inches(2), Inches(0.25),
+                           "SENTIMENT BREAKDOWN", size=8, bold=True, color=MID_GRAY)
+            bars_y = Inches(2.85)
+            bar_total_w = Inches(5.3)
+            try:
+                pw = float(pos_pct)
+                nw = float(neg_pct or 0)
+                uw = float(neutral_pct or 0)
+            except (TypeError, ValueError):
+                pw = nw = uw = 0.33
+            total = pw + nw + uw or 1
+            # Positive bar
+            pos_w = max(Inches(0.1), Inches(5.3 * pw / total))
+            b = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                       Inches(0.7), bars_y, pos_w, Inches(0.25))
+            b.fill.solid(); b.fill.fore_color.rgb = ACCENT_GREEN; b.line.fill.background()
+            # Neutral bar
+            neu_w = max(Inches(0.05), Inches(5.3 * uw / total))
+            b2 = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                        Inches(0.7) + pos_w, bars_y, neu_w, Inches(0.25))
+            b2.fill.solid(); b2.fill.fore_color.rgb = MID_GRAY; b2.line.fill.background()
+            # Negative bar
+            neg_w = max(Inches(0.05), Inches(5.3 * nw / total))
+            b3 = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                        Inches(0.7) + pos_w + neu_w, bars_y, neg_w, Inches(0.25))
+            b3.fill.solid(); b3.fill.fore_color.rgb = ACCENT_RED; b3.line.fill.background()
+
+            self._text_box(slide, Inches(0.7), bars_y + Inches(0.28), Inches(5.5), Inches(0.2),
+                           f"\u2588 Positive {_fmt_pct(pos_pct)}   \u2588 Neutral {_fmt_pct(neutral_pct)}   \u2588 Negative {_fmt_pct(neg_pct)}",
+                           size=8, color=LIGHT_GRAY)
+
+        # Narrative
         if narrative:
-            trunc = narrative if len(narrative) <= 350 else narrative[:347] + "..."
-            self._text_box(slide, Inches(0.7), y + Inches(1.35), Inches(5.5), Inches(1.6),
-                           trunc, size=11, color=OFF_WHITE, line_spacing=16)
+            self._text_box(slide, Inches(0.7), Inches(3.45), Inches(1.5), Inches(0.25),
+                           "NEWS NARRATIVE", size=8, bold=True, color=MID_GRAY)
+            disp = narrative if len(narrative) <= 450 else narrative[:447] + "..."
+            self._text_box(slide, Inches(0.7), Inches(3.75), Inches(5.8), Inches(1.8),
+                           disp, size=12, color=OFF_WHITE, line_spacing=17)
 
-        # Right column — Catalysts (enriched)
-        catalysts = thesis.get("catalysts", [])
-        news_catalysts = news.get("catalysts") or []
+        # Key themes
+        if themes:
+            self._text_box(slide, Inches(0.7), Inches(5.6), Inches(1.5), Inches(0.2),
+                           "KEY THEMES", size=8, bold=True, color=MID_GRAY)
+            self._text_box(slide, Inches(0.7), Inches(5.85), Inches(5.5), Inches(0.5),
+                           "  \u2022  ".join(themes[:6]), size=10, color=LIGHT_GRAY)
 
-        self._panel(slide, Inches(6.7), y, Inches(6.0), Inches(3.1),
+        # Right panel: Catalysts & Risks
+        rx = Inches(6.9)
+        rw = Inches(5.9)
+
+        # Catalysts panel
+        self._panel(slide, rx, Inches(1.15), rw, Inches(2.6),
                     fill=DARK_PANEL, border=BORDER_COLOR)
-        self._text_box(slide, Inches(6.9), y + Inches(0.1), Inches(3), Inches(0.25),
-                       "KEY CATALYSTS", size=8, bold=True, color=ACCENT_GOLD)
+        self._text_box(slide, rx + Inches(0.2), Inches(1.25), Inches(3), Inches(0.25),
+                       "CATALYSTS", size=8, bold=True, color=ACCENT_GREEN)
+        cat_items = []
+        for nc in news_catalysts[:4]:
+            if isinstance(nc, dict):
+                event = nc.get("event", nc.get("headline", ""))
+                conf = nc.get("confidence")
+                conf_str = f" ({conf*100:.0f}%)" if conf else ""
+                cat_items.append(f"{event}{conf_str}")
+            elif isinstance(nc, str):
+                cat_items.append(nc)
+        if cat_items:
+            paras = [{"text": f"\u25B8  {c}", "size": 11, "color": OFF_WHITE,
+                       "spacing_after": 8} for c in cat_items]
+            self._rich_text_box(slide, rx + Inches(0.2), Inches(1.6),
+                                Inches(5.4), Inches(2.0), paras)
 
-        all_catalysts = catalysts[:4]
-        # Add news-derived catalysts if thesis ones are short
-        if len(all_catalysts) < 4 and news_catalysts:
-            for nc in news_catalysts:
-                if len(all_catalysts) >= 5:
-                    break
-                if isinstance(nc, dict):
-                    event = nc.get("event", nc.get("headline", ""))
-                    if event and event not in all_catalysts:
-                        all_catalysts.append(event)
-                elif isinstance(nc, str) and nc not in all_catalysts:
-                    all_catalysts.append(nc)
-
-        if all_catalysts:
-            cat_paras = []
-            for ci, cat in enumerate(all_catalysts[:5]):
-                cat_paras.append({
-                    "text": f"{ci + 1}.  {cat}",
-                    "size": 12,
-                    "color": OFF_WHITE,
-                    "spacing_after": 10,
-                })
-            self._rich_text_box(slide, Inches(6.9), y + Inches(0.45),
-                                Inches(5.6), Inches(2.5), cat_paras)
-
-        # Verdict reasoning at very bottom
-        reasoning = verdict.get("reasoning", "")
-        if reasoning:
-            self._text_box(slide, Inches(0.6), Inches(6.55), Inches(12), Inches(0.35),
-                           reasoning[:300], size=9, color=DIM_GRAY)
+        # Risks panel
+        self._panel(slide, rx, Inches(3.95), rw, Inches(2.7),
+                    fill=DARK_PANEL, border=BORDER_COLOR)
+        self._text_box(slide, rx + Inches(0.2), Inches(4.05), Inches(3), Inches(0.25),
+                       "RISKS IDENTIFIED", size=8, bold=True, color=ACCENT_RED)
+        risk_items = []
+        for nr in news_risks[:4]:
+            if isinstance(nr, dict):
+                event = nr.get("event", nr.get("headline", ""))
+                conf = nr.get("confidence")
+                conf_str = f" ({conf*100:.0f}%)" if conf else ""
+                risk_items.append(f"{event}{conf_str}")
+            elif isinstance(nr, str):
+                risk_items.append(nr)
+        if risk_items:
+            paras = [{"text": f"\u25B8  {r}", "size": 11, "color": OFF_WHITE,
+                       "spacing_after": 8} for r in risk_items]
+            self._rich_text_box(slide, rx + Inches(0.2), Inches(4.4),
+                                Inches(5.4), Inches(2.0), paras)
 
         self._footer(slide, snap.get("ticker", ""))
 
     # ------------------------------------------------------------------
-    # SLIDES 6-8: Core Theses
+    # SLIDE 7 — Risk Assessment
     # ------------------------------------------------------------------
 
-    def _add_thesis_slides(self, analysis: dict):
-        fund = analysis.get("fundamentals") or {}
-        thesis = fund.get("investment_thesis") or {}
-        snap = analysis.get("snapshot") or {}
-        forecast_data = analysis.get("forecast") or {}
-        verdict = fund.get("verdict") or {}
-
-        strengths = thesis.get("strengths", [])
-        catalysts = list(thesis.get("catalysts", []))  # copy
-        risks = thesis.get("risks", [])
-        key_metrics = thesis.get("key_metrics", [])
-
-        # Build thesis items: combine strengths + catalysts
-        items: list[tuple[str, str | None, str | None]] = []
-        for s in strengths[:3]:
-            related_cat = catalysts.pop(0) if catalysts else None
-            related_risk = risks[len(items)] if len(items) < len(risks) else None
-            items.append((s, related_cat, related_risk))
-
-        # Ensure at least 1 slide
-        if not items:
-            items = [("Investment opportunity based on fundamental analysis.", None, None)]
-
-        for i, (strength, catalyst, risk) in enumerate(items[:3]):
-            slide = self._blank_slide()
-            self._title_bar(slide, f"Core Thesis {i + 1}")
-
-            # Large thesis number accent
-            self._text_box(slide, Inches(0.6), Inches(1.1), Inches(1), Inches(1),
-                           str(i + 1), size=60, bold=True, color=ACCENT_BLUE_DIM)
-
-            # Main thesis text (larger, bolder)
-            self._text_box(slide, Inches(1.5), Inches(1.2), Inches(11), Inches(1.4),
-                           strength, size=20, bold=True, color=WHITE, line_spacing=28)
-
-            # Catalyst section with panel
-            cy = Inches(2.9)
-            if catalyst:
-                self._panel(slide, Inches(0.5), cy, Inches(12.3), Inches(1.5),
-                            fill=DARK_PANEL, border=BORDER_COLOR)
-                self._side_accent(slide, cy + Inches(0.1), Inches(1.3), color=ACCENT_GOLD)
-                self._text_box(slide, Inches(0.85), cy + Inches(0.1), Inches(3), Inches(0.25),
-                               "CATALYST", size=9, bold=True, color=ACCENT_GOLD)
-                self._text_box(slide, Inches(0.85), cy + Inches(0.4), Inches(11.7), Inches(1.0),
-                               catalyst, size=14, color=OFF_WHITE, line_spacing=20)
-                cy += Inches(1.7)
-
-            # Counter-argument / risk awareness
-            if risk and i < 2:  # Show risk on first 2 thesis slides
-                self._panel(slide, Inches(0.5), cy, Inches(12.3), Inches(1.0),
-                            fill=DARK_PANEL, border=BORDER_COLOR)
-                self._side_accent(slide, cy + Inches(0.1), Inches(0.8), color=ACCENT_RED)
-                self._text_box(slide, Inches(0.85), cy + Inches(0.1), Inches(3), Inches(0.25),
-                               "KEY RISK TO THESIS", size=9, bold=True, color=ACCENT_RED)
-                self._text_box(slide, Inches(0.85), cy + Inches(0.4), Inches(11.7), Inches(0.5),
-                               risk[:200], size=12, color=LIGHT_GRAY)
-                cy += Inches(1.2)
-
-            # Supporting metrics (4 cards)
-            met_y = max(cy, Inches(4.8))
-            # Get metrics relevant to this thesis (cycle through)
-            start_idx = i * 3
-            slide_metrics = key_metrics[start_idx:start_idx + 4]
-            if not slide_metrics:
-                slide_metrics = key_metrics[:4]
-
-            if slide_metrics:
-                self._section_header(slide, Inches(0.6), met_y - Inches(0.35), "Supporting Data")
-                for mi, km in enumerate(slide_metrics[:4]):
-                    label = km.get("label", "")
-                    value = km.get("value", "")
-                    context = km.get("context", "")
-                    if label and value:
-                        self._metric_card(
-                            slide, Inches(0.6) + mi * Inches(3.1), met_y,
-                            label, str(value), width=Inches(2.9), height=Inches(1.0),
-                            subtitle=context[:50] if context else "",
-                            subtitle_color=DIM_GRAY,
-                        )
-
-            # Forecast on first thesis slide
-            if i == 0:
-                horizons = forecast_data.get("forecasts") or {}
-                horizon_12m = horizons.get("12M") or {}
-                ep = horizon_12m.get("ensemble_prediction") or {}
-                pred_ret = ep.get("predicted_return")
-                confidence = ep.get("confidence")
-                direction = ep.get("direction", "")
-                if pred_ret is not None:
-                    parts = [f"12-Month ML Forecast: {pred_ret:+.1f}% return"]
-                    if confidence:
-                        parts.append(f"{confidence * 100:.0f}% confidence")
-                    if direction:
-                        parts.append(f"direction: {direction}")
-                    self._text_box(slide, Inches(0.6), Inches(6.3), Inches(10), Inches(0.35),
-                                   "  \u2022  ".join(parts),
-                                   size=11, bold=True, color=ACCENT_BLUE)
-
-            self._footer(slide, snap.get("ticker", ""))
-
-    # ------------------------------------------------------------------
-    # SLIDE 9: Downside Protection
-    # ------------------------------------------------------------------
-
-    def _add_downside_slide(self, analysis: dict):
+    def _add_risk_assessment(self, a: dict):
         slide = self._blank_slide()
-        self._title_bar(slide, "Downside Protection",
-                        subtitle="Risk management and portfolio resilience analysis")
+        self._title_bar(slide, "Risk Assessment",
+                        subtitle="Value at Risk, drawdown analysis, and historical stress tests")
 
-        risk = analysis.get("risk") or {}
+        risk = a.get("risk") or {}
         var_data = risk.get("var") or {}
         dd_data = risk.get("drawdown") or {}
         scenarios = risk.get("scenarios") or []
-        fund = analysis.get("fundamentals") or {}
-        fh = fund.get("financial_health") or {}
-        cashflow = fh.get("cashflow_summary") or {}
-        balance = fh.get("balance_summary") or {}
-        quant = analysis.get("quant") or {}
+        quant = a.get("quant") or {}
         perf = quant.get("performance") or {}
-        snap = analysis.get("snapshot") or {}
+        snap = a.get("snapshot") or {}
 
-        # Top row: Three panels
         pw = Inches(3.9)
-        ph = Inches(2.8)
         pg = Inches(0.2)
         py = Inches(1.2)
+        ph = Inches(2.6)
 
-        # Panel 1: Value at Risk
+        # Panel 1: VaR
         self._panel(slide, Inches(0.5), py, pw, ph, fill=DARK_PANEL, border=BORDER_COLOR)
         self._text_box(slide, Inches(0.7), py + Inches(0.1), Inches(3), Inches(0.25),
-                       "VALUE AT RISK (95%, 1-DAY)", size=8, bold=True, color=ACCENT_BLUE)
-
+                       "VALUE AT RISK (95%)", size=8, bold=True, color=ACCENT_BLUE)
         var_items = [
-            ("Parametric VaR", var_data.get("parametric_var_pct"), "Normal distribution model"),
-            ("Historical VaR", var_data.get("historical_var_pct"), "Based on actual returns"),
-            ("Monte Carlo VaR", var_data.get("monte_carlo_var_pct"), "10,000 simulated paths"),
-            ("CVaR (Exp. Shortfall)", var_data.get("expected_shortfall_pct"), "Expected loss beyond VaR"),
+            ("Parametric VaR", var_data.get("parametric_var_pct")),
+            ("Historical VaR", var_data.get("historical_var_pct")),
+            ("Monte Carlo VaR", var_data.get("monte_carlo_var_pct")),
+            ("CVaR (Exp. Shortfall)", var_data.get("expected_shortfall_pct")),
         ]
-        for vi, (label, value, desc) in enumerate(var_items):
-            vy = py + Inches(0.45) + vi * Inches(0.55)
-            self._text_box(slide, Inches(0.7), vy, Inches(2.0), Inches(0.25),
-                           label, size=10, color=LIGHT_GRAY)
-            self._text_box(slide, Inches(2.8), vy, Inches(1.2), Inches(0.25),
-                           _fmt_pct(value), size=11, bold=True, color=ACCENT_RED,
-                           align=PP_ALIGN.RIGHT)
-            self._text_box(slide, Inches(0.7), vy + Inches(0.22), Inches(3), Inches(0.18),
-                           desc, size=7, color=DIM_GRAY)
+        for vi, (lbl, val) in enumerate(var_items):
+            vy = py + Inches(0.5) + vi * Inches(0.5)
+            self._data_row(slide, Inches(0.7), vy, lbl, _fmt_pct(val),
+                           w_label=Inches(2.0), w_value=Inches(1.2),
+                           value_color=ACCENT_RED)
 
-        # Daily & Annualized Vol
-        daily_vol = var_data.get("daily_vol")
-        ann_vol = var_data.get("annualized_vol")
-        if daily_vol or ann_vol:
-            self._text_box(slide, Inches(0.7), py + Inches(2.45), Inches(3.2), Inches(0.25),
-                           f"Daily Vol: {_fmt_pct(daily_vol)}  \u2022  Ann. Vol: {_fmt_pct(ann_vol)}",
-                           size=9, color=MID_GRAY)
-
-        # Panel 2: Cash Flow Resilience + Drawdown
+        # Panel 2: Risk-Adjusted Performance
         p2x = Inches(0.5) + pw + pg
         self._panel(slide, p2x, py, pw, ph, fill=DARK_PANEL, border=BORDER_COLOR)
         self._text_box(slide, p2x + Inches(0.2), py + Inches(0.1), Inches(3), Inches(0.25),
-                       "BALANCE SHEET & CASH FLOW", size=8, bold=True, color=ACCENT_BLUE)
-
-        cash_items = [
-            ("Free Cash Flow", _fmt_large(cashflow.get("free_cf"))),
-            ("FCF Margin", _fmt_pct(cashflow.get("fcf_margin"))),
-            ("Cash Position", _fmt_large(balance.get("cash"))),
-            ("Current Ratio", _fmt_ratio(balance.get("current_ratio"))),
-            ("Debt / Equity", _fmt_ratio(balance.get("debt_to_equity"))),
+                       "RISK-ADJUSTED RETURNS", size=8, bold=True, color=ACCENT_BLUE)
+        risk_items = [
+            ("Sharpe Ratio", _fmt_ratio(perf.get("sharpe_ratio"))),
+            ("Sortino Ratio", _fmt_ratio(perf.get("sortino_ratio"))),
+            ("Max Drawdown", _fmt_pct(perf.get("max_drawdown"))),
+            ("Ann. Volatility", _fmt_pct(perf.get("annualized_vol"))),
         ]
-        for vi, (label, value) in enumerate(cash_items):
-            vy = py + Inches(0.45) + vi * Inches(0.45)
-            self._text_box(slide, p2x + Inches(0.2), vy, Inches(2.2), Inches(0.35),
-                           label, size=10, color=LIGHT_GRAY)
-            self._text_box(slide, p2x + Inches(2.5), vy, Inches(1.2), Inches(0.35),
-                           value, size=11, bold=True, color=WHITE, align=PP_ALIGN.RIGHT)
+        for vi, (lbl, val) in enumerate(risk_items):
+            vy = py + Inches(0.5) + vi * Inches(0.5)
+            self._data_row(slide, p2x + Inches(0.2), vy, lbl, val,
+                           w_label=Inches(2.0), w_value=Inches(1.2),
+                           value_color=WHITE)
 
-        # Panel 3: Risk-Adjusted Returns + Drawdown
+        # Panel 3: Drawdown Stats
         p3x = Inches(0.5) + (pw + pg) * 2
         self._panel(slide, p3x, py, pw, ph, fill=DARK_PANEL, border=BORDER_COLOR)
         self._text_box(slide, p3x + Inches(0.2), py + Inches(0.1), Inches(3), Inches(0.25),
-                       "RISK-ADJUSTED RETURNS", size=8, bold=True, color=ACCENT_BLUE)
-
-        risk_items = [
-            ("Sharpe Ratio", _fmt_ratio(perf.get("sharpe_ratio")),
-             "Risk-adjusted excess return"),
-            ("Sortino Ratio", _fmt_ratio(perf.get("sortino_ratio")),
-             "Downside deviation adjusted"),
-            ("Max Drawdown", _fmt_pct(perf.get("max_drawdown")),
-             "Largest peak-to-trough decline"),
-            ("Ann. Volatility", _fmt_pct(perf.get("annualized_vol")),
-             "Annualized std deviation"),
+                       "DRAWDOWN ANALYSIS", size=8, bold=True, color=ACCENT_BLUE)
+        dd_items = [
+            ("Max Drawdown", _fmt_pct(dd_data.get("max_drawdown"))),
+            ("Current Drawdown", _fmt_pct(dd_data.get("current_drawdown"))),
+            ("# Drawdown Events", str(dd_data.get("n_drawdowns", "\u2014"))),
+            ("Avg Recovery (days)", str(dd_data.get("average_recovery_days") or "\u2014")),
         ]
-        for vi, (label, value, desc) in enumerate(risk_items):
-            vy = py + Inches(0.45) + vi * Inches(0.55)
-            self._text_box(slide, p3x + Inches(0.2), vy, Inches(2.0), Inches(0.25),
-                           label, size=10, color=LIGHT_GRAY)
-            self._text_box(slide, p3x + Inches(2.3), vy, Inches(1.3), Inches(0.25),
-                           value, size=11, bold=True, color=WHITE, align=PP_ALIGN.RIGHT)
-            self._text_box(slide, p3x + Inches(0.2), vy + Inches(0.22), Inches(3), Inches(0.18),
-                           desc, size=7, color=DIM_GRAY)
+        for vi, (lbl, val) in enumerate(dd_items):
+            vy = py + Inches(0.5) + vi * Inches(0.5)
+            self._data_row(slide, p3x + Inches(0.2), vy, lbl, val,
+                           w_label=Inches(2.0), w_value=Inches(1.2),
+                           value_color=WHITE)
 
-        # Bottom: Historical stress tests
-        self._divider(slide, Inches(4.2))
-        self._section_header(slide, Inches(0.6), Inches(4.35), "Historical Stress Tests")
+        # Bottom: Stress tests table
+        self._divider(slide, Inches(4.1))
+        self._section_header(slide, Inches(0.6), Inches(4.25), "Historical Stress Tests")
 
         if isinstance(scenarios, list) and scenarios:
-            # Header row
-            headers = ["Scenario", "Stock Return", "Benchmark", "Max Drawdown", "Period"]
-            hx_positions = [Inches(0.6), Inches(5), Inches(7.2), Inches(9.4), Inches(11.2)]
-            hx_widths = [Inches(4.2), Inches(2), Inches(2), Inches(1.8), Inches(2)]
-            for hi, header in enumerate(headers):
-                self._text_box(slide, hx_positions[hi], Inches(4.75),
-                               hx_widths[hi], Inches(0.25),
-                               header, size=8, bold=True, color=MID_GRAY)
+            headers = ["Scenario", "Period", "Stock Return", "Benchmark", "Max Drawdown"]
+            hx = [Inches(0.6), Inches(5.0), Inches(7.5), Inches(9.5), Inches(11.2)]
+            hw = [Inches(4.2), Inches(2.3), Inches(1.8), Inches(1.5), Inches(1.6)]
+            for hi, h in enumerate(headers):
+                self._text_box(slide, hx[hi], Inches(4.65), hw[hi], Inches(0.2),
+                               h, size=8, bold=True, color=MID_GRAY)
 
-            for si, sc in enumerate(scenarios[:4]):
+            for si, sc in enumerate(scenarios[:5]):
                 if not isinstance(sc, dict):
                     continue
-                sy = Inches(5.05) + si * Inches(0.42)
-                # Alternating stripe
+                sy = Inches(4.9) + si * Inches(0.38)
+                bg = DARK_PANEL if si % 2 == 0 else NAVY
                 stripe = slide.shapes.add_shape(
-                    MSO_SHAPE.RECTANGLE, Inches(0.5), sy, Inches(12.33), Inches(0.38),
+                    MSO_SHAPE.RECTANGLE, Inches(0.5), sy,
+                    Inches(12.33), Inches(0.35),
                 )
                 stripe.fill.solid()
-                stripe.fill.fore_color.rgb = DARK_PANEL if si % 2 == 0 else NAVY
+                stripe.fill.fore_color.rgb = bg
                 stripe.line.fill.background()
 
-                name = sc.get("description", sc.get("name", sc.get("scenario", f"Scenario {si + 1}")))
-                stock_ret = sc.get("stock_return") or sc.get("return") or sc.get("beta_adjusted_return")
+                name = sc.get("description", sc.get("name", ""))
+                stock_ret = sc.get("stock_return") or sc.get("beta_adjusted_return")
                 bench_ret = sc.get("benchmark_return")
                 mdd = sc.get("max_drawdown")
                 period = sc.get("period", "")
 
-                self._text_box(slide, hx_positions[0], sy + Inches(0.04), hx_widths[0], Inches(0.3),
+                self._text_box(slide, hx[0], sy + Inches(0.03), hw[0], Inches(0.28),
                                str(name)[:45], size=10, color=OFF_WHITE)
-
-                ret_color = ACCENT_RED
-                if stock_ret is not None:
-                    try:
-                        if float(stock_ret) > 0:
-                            ret_color = ACCENT_GREEN
-                    except (TypeError, ValueError):
-                        pass
-                self._text_box(slide, hx_positions[1], sy + Inches(0.04), hx_widths[1], Inches(0.3),
-                               _fmt_pct(stock_ret), size=10, bold=True, color=ret_color)
-                self._text_box(slide, hx_positions[2], sy + Inches(0.04), hx_widths[2], Inches(0.3),
+                self._text_box(slide, hx[1], sy + Inches(0.03), hw[1], Inches(0.28),
+                               str(period)[:22], size=9, color=DIM_GRAY)
+                self._text_box(slide, hx[2], sy + Inches(0.03), hw[2], Inches(0.28),
+                               _fmt_pct(stock_ret), size=10, bold=True,
+                               color=_pct_color(stock_ret))
+                self._text_box(slide, hx[3], sy + Inches(0.03), hw[3], Inches(0.28),
                                _fmt_pct(bench_ret), size=10, color=LIGHT_GRAY)
-                self._text_box(slide, hx_positions[3], sy + Inches(0.04), hx_widths[3], Inches(0.3),
+                self._text_box(slide, hx[4], sy + Inches(0.03), hw[4], Inches(0.28),
                                _fmt_pct(mdd), size=10, color=LIGHT_GRAY)
-                self._text_box(slide, hx_positions[4], sy + Inches(0.04), hx_widths[4], Inches(0.3),
-                               str(period)[:20], size=9, color=DIM_GRAY)
 
         self._footer(slide, snap.get("ticker", ""))
 
     # ------------------------------------------------------------------
-    # SLIDE 10: Valuation
+    # SLIDE 8 — Forecast & Outlook
     # ------------------------------------------------------------------
 
-    def _add_valuation_slide(self, analysis: dict):
+    def _add_forecast_outlook(self, a: dict):
         slide = self._blank_slide()
-        self._title_bar(slide, "Valuation",
-                        subtitle="DCF and comparable company analysis")
+        self._title_bar(slide, "Forecast & Outlook",
+                        subtitle="Machine learning ensemble forecast and quantitative metrics")
 
-        fund = analysis.get("fundamentals") or {}
-        dcf = fund.get("dcf_valuation") or {}
-        comps = fund.get("comps_valuation") or {}
-        combined = fund.get("combined_range") or {}
-        snap = analysis.get("snapshot") or {}
-        price = snap.get("price")
+        forecast = a.get("forecast") or {}
+        quant = a.get("quant") or {}
+        perf = quant.get("performance") or {}
+        mc = quant.get("monte_carlo") or {}
+        snap = a.get("snapshot") or {}
 
-        # Top-left: DCF section with panel
-        dcf_w = Inches(6.2)
-        self._panel(slide, Inches(0.5), Inches(1.15), dcf_w, Inches(2.2),
-                    fill=DARK_PANEL, border=BORDER_COLOR)
-        self._text_box(slide, Inches(0.7), Inches(1.25), Inches(3), Inches(0.25),
-                       "DCF VALUATION", size=8, bold=True, color=ACCENT_BLUE)
+        overall_dir = forecast.get("overall_direction", "")
+        lt_outlook = forecast.get("long_term_outlook", "")
+        forecasts = forecast.get("forecasts") or {}
 
-        # DCF hero metrics
-        dcf_cards = [
-            ("Implied Price", _fmt_price(dcf.get("implied_price")), ACCENT_GREEN),
-            ("Enterprise Value", _fmt_large(dcf.get("enterprise_value")), WHITE),
-            ("Equity Value", _fmt_large(dcf.get("equity_value")), WHITE),
-        ]
-        for di, (label, value, vc) in enumerate(dcf_cards):
-            self._metric_card(slide, Inches(0.7) + di * Inches(1.85), Inches(1.6),
-                              label, value, width=Inches(1.75), height=Inches(0.8),
-                              value_color=vc)
+        # Top: direction + outlook
+        if overall_dir:
+            dir_color = ACCENT_GREEN if "bull" in overall_dir.lower() else (
+                ACCENT_RED if "bear" in overall_dir.lower() else LIGHT_GRAY)
+            self._text_box(slide, Inches(0.6), Inches(1.2), Inches(3), Inches(0.4),
+                           f"Direction: {overall_dir.upper()}",
+                           size=20, bold=True, color=dir_color)
+        if lt_outlook:
+            self._text_box(slide, Inches(0.6), Inches(1.7), Inches(8), Inches(0.3),
+                           f"Long-term outlook: {lt_outlook}",
+                           size=13, color=LIGHT_GRAY)
 
-        # DCF assumptions (more detailed)
-        assumptions = dcf.get("assumptions_used") or {}
-        if assumptions:
-            self._text_box(slide, Inches(0.7), Inches(2.55), Inches(5.8), Inches(0.25),
-                           "ASSUMPTIONS", size=7, bold=True, color=MID_GRAY)
-            a_parts = []
-            wacc = assumptions.get("wacc")
-            tg = assumptions.get("terminal_growth_rate")
-            om = assumptions.get("operating_margin")
-            tr = assumptions.get("tax_rate")
-            if wacc:
-                a_parts.append(f"WACC: {_fmt_pct(wacc)}")
-            if tg:
-                a_parts.append(f"Terminal Growth: {_fmt_pct(tg)}")
-            if om:
-                a_parts.append(f"Op Margin: {_fmt_pct(om)}")
-            if tr:
-                a_parts.append(f"Tax Rate: {_fmt_pct(tr)}")
-            proj_years = assumptions.get("projection_years")
-            if proj_years:
-                a_parts.append(f"{proj_years}yr projection")
-            self._text_box(slide, Inches(0.7), Inches(2.78), Inches(5.8), Inches(0.4),
-                           "   \u2022   ".join(a_parts), size=9, color=LIGHT_GRAY)
+        # Forecast horizons
+        horizon_keys = ["5D", "30D", "90D", "6M", "12M"]
+        cards_shown = 0
+        y_card = Inches(2.3)
+        cw_h = Inches(2.35)
+        cg_h = Inches(0.15)
 
-        # Upside/downside callout
-        dcf_upside = dcf.get("upside_downside_pct")
-        if dcf_upside is not None:
-            try:
-                uv = float(dcf_upside)
-                uc = ACCENT_GREEN if uv > 0 else ACCENT_RED
-                sign = "+" if uv > 0 else ""
-                self._text_box(slide, Inches(0.7), Inches(3.1), Inches(5.8), Inches(0.25),
-                               f"DCF implies {sign}{uv:.1f}% {'upside' if uv > 0 else 'downside'} from current price",
-                               size=10, bold=True, color=uc)
-            except (TypeError, ValueError):
-                pass
+        for hk in horizon_keys:
+            h_data = forecasts.get(hk) or {}
+            ep = h_data.get("ensemble_prediction") or {}
+            pred_ret = ep.get("predicted_return")
+            confidence = ep.get("confidence")
+            direction = ep.get("direction", "")
+            if pred_ret is None:
+                continue
 
-        # Top-right: Comps section with panel
-        comp_x = Inches(6.9)
-        comp_w = Inches(5.9)
-        self._panel(slide, comp_x, Inches(1.15), comp_w, Inches(2.2),
-                    fill=DARK_PANEL, border=BORDER_COLOR)
-        self._text_box(slide, comp_x + Inches(0.2), Inches(1.25), Inches(4), Inches(0.25),
-                       "COMPARABLE COMPANY ANALYSIS", size=8, bold=True, color=ACCENT_BLUE)
+            desc_parts = []
+            if direction:
+                desc_parts.append(direction.capitalize())
+            if confidence:
+                desc_parts.append(f"{confidence*100:.0f}% conf")
 
-        val_range = comps.get("valuation_range") or {}
-        approaches = [
-            ("P/E Approach", val_range.get("pe_approach") or {}),
-            ("EV/EBITDA Approach", val_range.get("ev_ebitda_approach") or {}),
-            ("EV/Revenue Approach", val_range.get("ev_revenue_approach") or {}),
-        ]
-
-        for ai, (approach_name, approach_data) in enumerate(approaches):
-            ay = Inches(1.65) + ai * Inches(0.55)
-            implied = approach_data.get("implied_value") or approach_data.get("implied_market_cap")
-            upside = approach_data.get("implied_upside")
-            peer_med = approach_data.get("peer_median_pe") or approach_data.get("peer_median_ev_ebitda") or approach_data.get("peer_median_ev_revenue")
-
-            self._text_box(slide, comp_x + Inches(0.2), ay, Inches(2.2), Inches(0.25),
-                           approach_name, size=10, color=LIGHT_GRAY)
-            self._text_box(slide, comp_x + Inches(2.5), ay, Inches(1.5), Inches(0.25),
-                           _fmt_large(implied), size=11, bold=True, color=WHITE,
-                           align=PP_ALIGN.RIGHT)
-            if upside is not None:
-                try:
-                    uv = float(upside)
-                    uc = ACCENT_GREEN if uv > 0 else ACCENT_RED
-                    self._text_box(slide, comp_x + Inches(4.2), ay, Inches(1.2), Inches(0.25),
-                                   f"{uv:+.1f}%", size=10, bold=True, color=uc,
-                                   align=PP_ALIGN.RIGHT)
-                except (TypeError, ValueError):
-                    pass
-
-        # Peer count
-        peer_count = comps.get("peer_count")
-        if peer_count:
-            self._text_box(slide, comp_x + Inches(0.2), Inches(3.1), Inches(5), Inches(0.2),
-                           f"Based on {peer_count} comparable companies",
-                           size=9, color=DIM_GRAY)
-
-        # Bottom: Sensitivity heatmap + Bull/Base/Bear
-        self._divider(slide, Inches(3.5))
-
-        # Sensitivity heatmap
-        heatmap_path = self._create_sensitivity_heatmap(dcf, price)
-        if heatmap_path:
-            self._add_picture(slide, heatmap_path, Inches(0.3), Inches(3.7),
-                              width=Inches(6.8), height=Inches(3.3))
-
-        # Bull / Base / Bear range chart
-        range_path = self._create_range_chart(combined, price)
-        if range_path:
-            self._add_picture(slide, range_path, Inches(7.2), Inches(3.7),
-                              width=Inches(5.5), height=Inches(1.6))
-
-        # Combined range metrics
-        if combined:
-            y_range = Inches(5.6)
-            mw = combined.get("methodology_weights") or {}
-            dcf_weight = mw.get("dcf")
-            comps_weight = mw.get("comps")
-
-            self._large_metric_card(slide, Inches(7.2), y_range, "Bear Case",
-                                    _fmt_price(combined.get("low")),
-                                    width=Inches(1.7), height=Inches(1.2), value_color=ACCENT_RED,
-                                    description="Downside scenario")
-            self._large_metric_card(slide, Inches(9.1), y_range, "Base Case",
-                                    _fmt_price(combined.get("mid")),
-                                    width=Inches(1.7), height=Inches(1.2), value_color=ACCENT_BLUE,
-                                    description="Most likely")
-            self._large_metric_card(slide, Inches(11.0), y_range, "Bull Case",
-                                    _fmt_price(combined.get("high")),
-                                    width=Inches(1.7), height=Inches(1.2), value_color=ACCENT_GREEN,
-                                    description="Upside scenario")
-
-            if dcf_weight and comps_weight:
-                self._text_box(slide, Inches(7.2), Inches(6.5), Inches(5.5), Inches(0.2),
-                               f"Blended: {dcf_weight*100:.0f}% DCF + {comps_weight*100:.0f}% Comps",
-                               size=8, color=DIM_GRAY, align=PP_ALIGN.CENTER)
-
-        self._footer(slide, snap.get("ticker", ""))
-
-    # ------------------------------------------------------------------
-    # SLIDE 11: Risks & Mitigants
-    # ------------------------------------------------------------------
-
-    def _add_risks_slide(self, analysis: dict):
-        slide = self._blank_slide()
-        self._title_bar(slide, "Risks & Mitigants",
-                        subtitle="Key risks to the investment thesis and how they are addressed")
-
-        fund = analysis.get("fundamentals") or {}
-        thesis = fund.get("investment_thesis") or {}
-        news = _sg(analysis, "news", "synthesis") or {}
-        snap = analysis.get("snapshot") or {}
-
-        risks = thesis.get("risks", [])
-        strengths = thesis.get("strengths", [])
-        news_risks = news.get("risks") or []
-
-        # Supplement risks from news if needed
-        all_risks = list(risks[:5])
-        if len(all_risks) < 3 and news_risks:
-            for nr in news_risks:
-                if len(all_risks) >= 5:
-                    break
-                if isinstance(nr, dict):
-                    event = nr.get("event", nr.get("headline", ""))
-                    if event and event not in all_risks:
-                        all_risks.append(event)
-
-        # Build risk/mitigant pairs
-        pairs: list[tuple[str, str]] = []
-        for i, risk_text in enumerate(all_risks[:5]):
-            mitigant = strengths[i] if i < len(strengths) else "Fundamental value and diversified revenue streams provide margin of safety."
-            pairs.append((risk_text, mitigant))
-
-        if not pairs:
-            self._text_box(slide, Inches(0.6), Inches(2), Inches(10), Inches(1),
-                           "No significant risks identified in the current analysis. "
-                           "This may indicate limited data availability rather than an absence of risk.",
-                           size=14, color=LIGHT_GRAY)
-            self._footer(slide, snap.get("ticker", ""))
-            return
-
-        # Headers
-        self._panel(slide, Inches(0.5), Inches(1.25), Inches(5.9), Inches(0.4),
-                    fill=ACCENT_RED, border=ACCENT_RED, radius=False)
-        self._text_box(slide, Inches(0.7), Inches(1.28), Inches(5.5), Inches(0.35),
-                       "RISK", size=11, bold=True, color=WHITE)
-
-        self._panel(slide, Inches(6.9), Inches(1.25), Inches(5.9), Inches(0.4),
-                    fill=ACCENT_GREEN_DIM, border=ACCENT_GREEN_DIM, radius=False)
-        self._text_box(slide, Inches(7.1), Inches(1.28), Inches(5.5), Inches(0.35),
-                       "MITIGANT", size=11, bold=True, color=WHITE)
-
-        row_h = Inches(1.0) if len(pairs) <= 4 else Inches(0.85)
-
-        for pi, (risk_text, mitigant) in enumerate(pairs):
-            y = Inches(1.8) + pi * row_h
-
-            # Row backgrounds
-            bg_color = DARK_PANEL if pi % 2 == 0 else NAVY
-            self._panel(slide, Inches(0.5), y, Inches(5.9), row_h - Inches(0.08),
-                        fill=bg_color, border=BORDER_COLOR, radius=False)
-            self._panel(slide, Inches(6.9), y, Inches(5.9), row_h - Inches(0.08),
-                        fill=bg_color, border=BORDER_COLOR, radius=False)
-
-            # Risk number badge
-            num_badge = slide.shapes.add_shape(
-                MSO_SHAPE.OVAL, Inches(0.65), y + Inches(0.12), Inches(0.28), Inches(0.28),
+            sign = "+" if pred_ret > 0 else ""
+            vc = ACCENT_GREEN if pred_ret > 0 else ACCENT_RED
+            self._large_metric_card(
+                slide, Inches(0.6) + cards_shown * (cw_h + cg_h), y_card,
+                f"{hk} Forecast", f"{sign}{pred_ret:.1f}%",
+                width=cw_h, height=Inches(1.2), value_color=vc,
+                description="  \u2022  ".join(desc_parts),
             )
-            num_badge.fill.solid()
-            num_badge.fill.fore_color.rgb = ACCENT_RED
-            num_badge.line.fill.background()
-            self._text_box(slide, Inches(0.65), y + Inches(0.12), Inches(0.28), Inches(0.28),
-                           str(pi + 1), size=9, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+            cards_shown += 1
+            if cards_shown >= 5:
+                break
 
-            # Risk text (larger, more readable)
-            r_text = risk_text if len(risk_text) <= 200 else risk_text[:197] + "..."
-            self._text_box(slide, Inches(1.05), y + Inches(0.1), Inches(5.15), row_h - Inches(0.2),
-                           r_text, size=11, color=OFF_WHITE, line_spacing=15)
+        # Monte Carlo summary
+        if mc:
+            y_mc = Inches(3.8)
+            self._divider(slide, y_mc - Inches(0.15))
+            self._section_header(slide, Inches(0.6), y_mc, "Monte Carlo Simulation")
+            mc_items = [
+                ("Simulated Paths", str(mc.get("n_paths", "\u2014"))),
+                ("Horizon", f"{mc.get('horizon_days', '\u2014')} days"),
+                ("Mean Return", _fmt_pct(mc.get("mean_return"))),
+                ("Median Return", _fmt_pct(mc.get("median_return"))),
+                ("5th Percentile", _fmt_pct(mc.get("pct_5"))),
+                ("95th Percentile", _fmt_pct(mc.get("pct_95"))),
+                ("Prob. of Loss", _fmt_pct(mc.get("prob_loss"))),
+            ]
+            for mi, (lbl, val) in enumerate(mc_items):
+                row, col = divmod(mi, 4)
+                mx = Inches(0.6) + col * Inches(3.1)
+                my = Inches(4.35) + row * Inches(0.45)
+                self._data_row(slide, mx, my, lbl, val,
+                               w_label=Inches(1.6), w_value=Inches(1.0),
+                               value_color=WHITE)
 
-            # Arrow connector
-            self._text_box(slide, Inches(6.45), y + Inches(0.15), Inches(0.4), Inches(0.5),
-                           "\u2192", size=18, color=MID_GRAY, align=PP_ALIGN.CENTER)
-
-            # Mitigant text
-            m_text = mitigant if len(mitigant) <= 200 else mitigant[:197] + "..."
-            self._text_box(slide, Inches(7.1), y + Inches(0.1), Inches(5.5), row_h - Inches(0.2),
-                           m_text, size=11, color=OFF_WHITE, line_spacing=15)
+        # Performance metrics
+        if perf:
+            y_perf = Inches(5.5)
+            self._divider(slide, y_perf - Inches(0.15))
+            self._section_header(slide, Inches(0.6), y_perf, "Performance Metrics")
+            perf_items = [
+                ("Ann. Return", _fmt_pct(perf.get("annualized_return")),
+                 _pct_color(perf.get("annualized_return"))),
+                ("Ann. Volatility", _fmt_pct(perf.get("annualized_vol")), WHITE),
+                ("Sharpe Ratio", _fmt_ratio(perf.get("sharpe_ratio")), WHITE),
+                ("Sortino Ratio", _fmt_ratio(perf.get("sortino_ratio")), WHITE),
+                ("Max Drawdown", _fmt_pct(perf.get("max_drawdown")), ACCENT_RED),
+            ]
+            for pi, (lbl, val, vc) in enumerate(perf_items):
+                self._metric_card(
+                    slide, Inches(0.6) + pi * Inches(2.45), Inches(5.85),
+                    lbl, val, width=Inches(2.3), height=Inches(0.85),
+                    value_color=vc,
+                )
 
         self._footer(slide, snap.get("ticker", ""))
 
     # ------------------------------------------------------------------
-    # SLIDE 12: Conclusion
+    # SLIDE 9 — Strengths & Risks
     # ------------------------------------------------------------------
 
-    def _add_conclusion_slide(self, analysis: dict):
+    def _add_strengths_risks(self, a: dict):
+        slide = self._blank_slide()
+        self._title_bar(slide, "Strengths & Risks",
+                        subtitle="Balanced view of the investment profile")
+
+        thesis = _sg(a, "fundamentals", "investment_thesis") or {}
+        snap = a.get("snapshot") or {}
+
+        strengths = thesis.get("strengths", [])
+        risks = thesis.get("risks", [])
+        catalysts = thesis.get("catalysts", [])
+
+        col_w = Inches(6.0)
+        gutter = Inches(0.3)
+
+        # Left: Strengths
+        self._panel(slide, Inches(0.5), Inches(1.2), col_w, Inches(5.3),
+                    fill=DARK_PANEL, border=BORDER_COLOR)
+        # Green header bar
+        hdr = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, Inches(0.5), Inches(1.2), col_w, Inches(0.4),
+        )
+        hdr.fill.solid()
+        hdr.fill.fore_color.rgb = ACCENT_GREEN_DIM
+        hdr.line.fill.background()
+        self._text_box(slide, Inches(0.7), Inches(1.23), Inches(5), Inches(0.35),
+                       "STRENGTHS & CATALYSTS", size=11, bold=True, color=WHITE)
+
+        all_pos = []
+        for s in strengths[:4]:
+            all_pos.append(("strength", s))
+        for c in catalysts[:3]:
+            all_pos.append(("catalyst", c))
+
+        for pi, (ptype, text) in enumerate(all_pos[:6]):
+            y = Inches(1.8) + pi * Inches(0.75)
+            icon = "\u2713" if ptype == "strength" else "\u2605"
+            icon_color = ACCENT_GREEN if ptype == "strength" else ACCENT_GOLD
+            disp = text if len(text) <= 180 else text[:177] + "..."
+            self._text_box(slide, Inches(0.7), y, Inches(0.3), Inches(0.3),
+                           icon, size=14, bold=True, color=icon_color)
+            tag = "STRENGTH" if ptype == "strength" else "CATALYST"
+            self._text_box(slide, Inches(1.1), y - Inches(0.02), Inches(1.5), Inches(0.2),
+                           tag, size=7, bold=True, color=icon_color)
+            self._text_box(slide, Inches(1.1), y + Inches(0.2), Inches(5.2), Inches(0.5),
+                           disp, size=11, color=OFF_WHITE, line_spacing=15)
+
+        # Right: Risks
+        rx = Inches(0.5) + col_w + gutter
+        self._panel(slide, rx, Inches(1.2), col_w, Inches(5.3),
+                    fill=DARK_PANEL, border=BORDER_COLOR)
+        hdr2 = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, rx, Inches(1.2), col_w, Inches(0.4),
+        )
+        hdr2.fill.solid()
+        hdr2.fill.fore_color.rgb = ACCENT_RED
+        hdr2.line.fill.background()
+        self._text_box(slide, rx + Inches(0.2), Inches(1.23), Inches(5), Inches(0.35),
+                       "RISKS & CONCERNS", size=11, bold=True, color=WHITE)
+
+        for ri, risk_text in enumerate(risks[:6]):
+            y = Inches(1.8) + ri * Inches(0.75)
+            disp = risk_text if len(risk_text) <= 180 else risk_text[:177] + "..."
+            # Number badge
+            num = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL, rx + Inches(0.15), y + Inches(0.05),
+                Inches(0.25), Inches(0.25),
+            )
+            num.fill.solid()
+            num.fill.fore_color.rgb = ACCENT_RED
+            num.line.fill.background()
+            self._text_box(slide, rx + Inches(0.15), y + Inches(0.05),
+                           Inches(0.25), Inches(0.25),
+                           str(ri + 1), size=9, bold=True, color=WHITE,
+                           align=PP_ALIGN.CENTER)
+            self._text_box(slide, rx + Inches(0.55), y, Inches(5.25), Inches(0.65),
+                           disp, size=11, color=OFF_WHITE, line_spacing=15)
+
+        self._footer(slide, snap.get("ticker", ""))
+
+    # ------------------------------------------------------------------
+    # SLIDE 10 — Conclusion
+    # ------------------------------------------------------------------
+
+    def _add_conclusion(self, a: dict):
         slide = self._blank_slide()
 
-        snap = analysis.get("snapshot") or {}
-        fund = analysis.get("fundamentals") or {}
+        snap = a.get("snapshot") or {}
+        fund = a.get("fundamentals") or {}
         verdict = fund.get("verdict") or {}
         thesis = fund.get("investment_thesis") or {}
-        forecast = analysis.get("forecast") or {}
         combined = fund.get("combined_range") or {}
-        risk_data = analysis.get("risk") or {}
-        quant = analysis.get("quant") or {}
+        forecast = a.get("forecast") or {}
+        quant = a.get("quant") or {}
         perf = quant.get("performance") or {}
 
-        ticker = snap.get("ticker", analysis.get("ticker", ""))
+        ticker = snap.get("ticker", a.get("ticker", ""))
         name = snap.get("name", ticker)
         label = verdict.get("label", "")
         upside = verdict.get("upside_pct")
@@ -1338,17 +1273,16 @@ class PitchDeckGenerator:
         price = snap.get("price")
 
         is_long = label in ("undervalued", "fairly_valued")
-        rec_text = "LONG" if is_long else "SHORT"
+        rec_text = "BUY" if label == "undervalued" else ("HOLD" if label == "fairly_valued" else "SELL")
         rec_color = ACCENT_GREEN if is_long else ACCENT_RED
 
-        # Title
         self._text_box(slide, Inches(0.8), Inches(0.6), Inches(11), Inches(0.7),
-                       "Conclusion", size=34, bold=True, color=WHITE)
+                       "Summary & Conclusion", size=32, bold=True, color=WHITE)
 
-        # Recommendation badge
+        # Badge + company line
         badge = slide.shapes.add_shape(
             MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.8), Inches(1.5), Inches(2.0), Inches(0.6),
+            Inches(0.8), Inches(1.5), Inches(1.6), Inches(0.55),
         )
         badge.fill.solid()
         badge.fill.fore_color.rgb = rec_color
@@ -1356,29 +1290,29 @@ class PitchDeckGenerator:
         tf = badge.text_frame
         p = tf.paragraphs[0]
         p.text = rec_text
-        p.font.size = Pt(24)
+        p.font.size = Pt(22)
         p.font.bold = True
         p.font.color.rgb = WHITE
         p.font.name = "Calibri"
         p.alignment = PP_ALIGN.CENTER
 
-        # Company + target line
-        target_parts = [f"{name} ({ticker})"]
+        parts = [f"{name} ({ticker})"]
         if fair_mid:
-            target_parts.append(f"Target: {_fmt_price(fair_mid)}")
+            parts.append(f"Target: {_fmt_price(fair_mid)}")
         if upside:
-            target_parts.append(f"Upside: {upside:+.1f}%")
-        self._text_box(slide, Inches(3.1), Inches(1.5), Inches(9.5), Inches(0.6),
-                       "  \u2022  ".join(target_parts),
-                       size=18, bold=True, color=WHITE)
+            parts.append(f"Upside: {upside:+.1f}%")
+        self._text_box(slide, Inches(2.6), Inches(1.5), Inches(10), Inches(0.55),
+                       "  \u2022  ".join(parts), size=18, bold=True, color=WHITE)
 
-        # Key metrics summary row
-        my = Inches(2.4)
+        # Key metrics
+        my = Inches(2.3)
         summary_metrics = []
         if price:
             summary_metrics.append(("Price", _fmt_price(price), WHITE))
         if fair_low and fair_high:
-            summary_metrics.append(("Fair Value Range", f"{_fmt_price(fair_low)} \u2013 {_fmt_price(fair_high)}", ACCENT_BLUE))
+            summary_metrics.append(("Fair Value Range",
+                                    f"{_fmt_price(fair_low)} \u2013 {_fmt_price(fair_high)}",
+                                    ACCENT_BLUE))
         sharpe = perf.get("sharpe_ratio")
         if sharpe:
             summary_metrics.append(("Sharpe", _fmt_ratio(sharpe), WHITE))
@@ -1391,82 +1325,74 @@ class PitchDeckGenerator:
                               ml, mv, width=Inches(2.9), height=Inches(0.85),
                               value_color=mc)
 
-        # Key investment points (expanded, numbered)
+        # Key takeaways panel
         points = []
-        strengths = thesis.get("strengths", [])
-        catalysts = thesis.get("catalysts", [])
         reasoning = verdict.get("reasoning", "")
-
-        if strengths:
-            points.append(strengths[0])
-        if catalysts:
-            points.append(f"Catalyst: {catalysts[0]}")
         if reasoning:
             points.append(reasoning)
-
-        overall_dir = forecast.get("overall_direction", "")
-        lt_outlook = forecast.get("long_term_outlook", "")
-        if overall_dir:
-            parts = [f"ML forecast direction: {overall_dir}"]
-            if lt_outlook:
-                parts.append(f"long-term outlook: {lt_outlook}")
-            points.append(". ".join(parts) + ".")
-
-        # Add a risk awareness point
+        strengths = thesis.get("strengths", [])
+        if strengths:
+            points.append(strengths[0])
+        catalysts = thesis.get("catalysts", [])
+        if catalysts:
+            points.append(f"Catalyst: {catalysts[0]}")
         risks = thesis.get("risks", [])
         if risks:
             points.append(f"Key risk: {risks[0]}")
+        overall_dir = forecast.get("overall_direction", "")
+        lt_outlook = forecast.get("long_term_outlook", "")
+        if overall_dir:
+            p_str = f"ML forecast: {overall_dir}"
+            if lt_outlook:
+                p_str += f"; long-term outlook: {lt_outlook}"
+            points.append(p_str)
 
         if points:
-            self._panel(slide, Inches(0.7), Inches(3.5), Inches(11.9), Inches(2.8),
+            self._panel(slide, Inches(0.7), Inches(3.4), Inches(11.9), Inches(2.9),
                         fill=DARK_PANEL, border=BORDER_LIGHT)
-            self._text_box(slide, Inches(0.9), Inches(3.6), Inches(3), Inches(0.25),
+            self._text_box(slide, Inches(0.9), Inches(3.5), Inches(3), Inches(0.25),
                            "KEY TAKEAWAYS", size=8, bold=True, color=ACCENT_BLUE)
-
-            point_paras = []
+            paras = []
             for idx, pt in enumerate(points[:5]):
-                display = pt if len(pt) <= 200 else pt[:197] + "..."
-                point_paras.append({
-                    "text": f"{idx + 1}.  {display}",
+                disp = pt if len(pt) <= 220 else pt[:217] + "..."
+                paras.append({
+                    "text": f"{idx + 1}.  {disp}",
                     "size": 13,
                     "color": OFF_WHITE,
                     "spacing_after": 10,
                 })
-            self._rich_text_box(slide, Inches(1.0), Inches(3.9),
-                                Inches(11.4), Inches(2.3), point_paras)
+            self._rich_text_box(slide, Inches(1.0), Inches(3.8),
+                                Inches(11.4), Inches(2.4), paras)
 
-        # Bottom branding
-        self._text_box(slide, Inches(0.8), Inches(6.3), Inches(12), Inches(0.45),
+        self._text_box(slide, Inches(0.8), Inches(6.35), Inches(12), Inches(0.4),
                        "Generated by AlphaEdge Analysis Platform",
-                       size=13, bold=True, color=ACCENT_BLUE, align=PP_ALIGN.CENTER)
+                       size=12, bold=True, color=ACCENT_BLUE, align=PP_ALIGN.CENTER)
 
         self._footer(slide, ticker)
 
     # ------------------------------------------------------------------
-    # Chart generators (matplotlib -> PNG)
+    # Chart generators
     # ------------------------------------------------------------------
 
     def _create_peer_chart(self, comps: dict, snap: dict) -> str | None:
-        """Horizontal bar chart: target vs peer median for key metrics."""
         target = comps.get("target") or {}
         peers = comps.get("peers") or []
         if not target or not peers:
             return None
 
-        metrics = ["pe", "ev_ebitda", "operating_margin", "roe", "revenue_growth", "gross_margin"]
-        labels = ["P/E", "EV/EBITDA", "Op Margin", "ROE", "Rev Growth", "Gross Margin"]
+        metrics = ["pe", "ev_ebitda", "operating_margin", "roe",
+                    "revenue_growth", "gross_margin"]
+        labels = ["P/E", "EV/EBITDA", "Op Margin", "ROE",
+                   "Rev Growth", "Gross Margin"]
 
-        target_vals = []
-        peer_medians = []
-        valid_labels = []
-
+        target_vals, peer_medians, valid_labels = [], [], []
         for m, l in zip(metrics, labels):
             tv = target.get(m)
-            peer_vs = [p.get(m) for p in peers if p.get(m) is not None]
-            if tv is not None and peer_vs:
+            pvs = [p.get(m) for p in peers if p.get(m) is not None]
+            if tv is not None and pvs:
                 try:
                     target_vals.append(float(tv))
-                    peer_medians.append(float(np.median(peer_vs)))
+                    peer_medians.append(float(np.median(pvs)))
                     valid_labels.append(l)
                 except (TypeError, ValueError):
                     pass
@@ -1475,33 +1401,28 @@ class PitchDeckGenerator:
             return None
 
         with plt.rc_context(_MPL_RC):
-            fig, ax = plt.subplots(figsize=(5.8, 3.5), dpi=150)
+            fig, ax = plt.subplots(figsize=(6.2, 4.0), dpi=150)
             y_pos = np.arange(len(valid_labels))
             bar_h = 0.35
-
             ax.barh(y_pos - bar_h / 2, target_vals, bar_h,
                     label=snap.get("ticker", "Target"),
                     color="#6366F1", edgecolor="none")
             ax.barh(y_pos + bar_h / 2, peer_medians, bar_h,
-                    label="Peer Median",
-                    color="#475569", edgecolor="none")
-
+                    label="Peer Median", color="#475569", edgecolor="none")
             ax.set_yticks(y_pos)
             ax.set_yticklabels(valid_labels, fontsize=10)
             ax.legend(loc="lower right", fontsize=9, facecolor="#0B142B",
                       edgecolor="#1E293B", labelcolor="white")
             ax.grid(axis="x", alpha=0.3)
-            ax.set_title("Target vs Peer Median", fontsize=13, color="white",
-                         pad=12, fontweight="bold")
+            ax.set_title("Target vs Peer Median", fontsize=13,
+                         color="white", pad=12, fontweight="bold")
             fig.tight_layout()
-
             path = os.path.join(self._charts_dir, "peer_chart.png")
             fig.savefig(path, bbox_inches="tight", facecolor="#0B142B")
             plt.close(fig)
             return path
 
     def _create_fair_value_chart(self, price, low, mid, high) -> str | None:
-        """Horizontal bar showing current price vs fair value range."""
         vals = [price, low, mid, high]
         if any(v is None for v in vals):
             return None
@@ -1511,34 +1432,25 @@ class PitchDeckGenerator:
             return None
 
         with plt.rc_context(_MPL_RC):
-            fig, ax = plt.subplots(figsize=(12.5, 1.9), dpi=150)
+            fig, ax = plt.subplots(figsize=(12.3, 1.4), dpi=150)
+            all_v = [price, low, mid, high]
+            x_min, x_max = min(all_v) * 0.82, max(all_v) * 1.18
 
-            all_vals = [price, low, mid, high]
-            x_min = min(all_vals) * 0.82
-            x_max = max(all_vals) * 1.18
+            ax.barh(0, mid - low, left=low, height=0.45,
+                    color="#EF4444", alpha=0.3, edgecolor="none")
+            ax.barh(0, high - mid, left=mid, height=0.45,
+                    color="#10B981", alpha=0.3, edgecolor="none")
+            ax.barh(0, high - low, left=low, height=0.45,
+                    color="none", edgecolor="#6366F1", linewidth=2)
 
-            # Gradient effect: bear zone + bull zone
-            ax.barh(0, mid - low, left=low, height=0.45, color="#EF4444",
-                    alpha=0.3, edgecolor="none")
-            ax.barh(0, high - mid, left=mid, height=0.45, color="#10B981",
-                    alpha=0.3, edgecolor="none")
-            # Full range outline
-            ax.barh(0, high - low, left=low, height=0.45, color="none",
-                    edgecolor="#6366F1", linewidth=2)
-
-            # Mid marker
             ax.plot(mid, 0, marker="D", color="#6366F1", markersize=14, zorder=5)
             ax.annotate(f"Fair Value\n${mid:.2f}", (mid, 0.4),
-                        ha="center", va="bottom", fontsize=10, color="#6366F1",
-                        fontweight="bold")
-
-            # Current price marker
+                        ha="center", va="bottom", fontsize=10,
+                        color="#6366F1", fontweight="bold")
             ax.plot(price, 0, marker="v", color="#F59E0B", markersize=16, zorder=5)
-            ax.annotate(f"Current Price\n${price:.2f}", (price, -0.4),
-                        ha="center", va="top", fontsize=10, color="#F59E0B",
-                        fontweight="bold")
-
-            # Bear / Bull labels
+            ax.annotate(f"Current\n${price:.2f}", (price, -0.4),
+                        ha="center", va="top", fontsize=10,
+                        color="#F59E0B", fontweight="bold")
             ax.annotate(f"Bear: ${low:.2f}", (low, -0.4),
                         ha="center", va="top", fontsize=9, color="#EF4444")
             ax.annotate(f"Bull: ${high:.2f}", (high, -0.4),
@@ -1552,18 +1464,15 @@ class PitchDeckGenerator:
                          color="white", pad=10, fontweight="bold")
             ax.grid(axis="x", alpha=0.2)
             fig.tight_layout()
-
             path = os.path.join(self._charts_dir, "fair_value.png")
             fig.savefig(path, bbox_inches="tight", facecolor="#0B142B")
             plt.close(fig)
             return path
 
     def _create_sensitivity_heatmap(self, dcf: dict, current_price) -> str | None:
-        """5x5 WACC vs terminal growth heatmap."""
         grid = _sg(dcf, "sensitivity_grid", "implied_prices")
         if not grid or not isinstance(grid, dict):
             return None
-
         try:
             current_price = float(current_price) if current_price else None
         except (TypeError, ValueError):
@@ -1572,11 +1481,10 @@ class PitchDeckGenerator:
         wacc_keys = sorted(grid.keys())
         if not wacc_keys:
             return None
-
-        first_tg_map = grid[wacc_keys[0]]
-        if not isinstance(first_tg_map, dict):
+        first = grid[wacc_keys[0]]
+        if not isinstance(first, dict):
             return None
-        tg_keys = sorted(first_tg_map.keys())
+        tg_keys = sorted(first.keys())
 
         data = []
         for wk in wacc_keys:
@@ -1592,105 +1500,84 @@ class PitchDeckGenerator:
             return None
 
         with plt.rc_context(_MPL_RC):
-            fig, ax = plt.subplots(figsize=(6.5, 3.3), dpi=150)
-
-            # Color based on distance from current price
+            fig, ax = plt.subplots(figsize=(6.5, 3.0), dpi=150)
             if current_price:
-                vmin = current_price * 0.3
-                vmax = current_price * 2.0
+                vmin, vmax = current_price * 0.3, current_price * 2.0
                 cmap = "RdYlGn"
             else:
                 vmin, vmax = np.nanmin(arr), np.nanmax(arr)
                 cmap = "YlGnBu"
 
-            im = ax.imshow(arr, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
-
-            # Annotate cells
+            im = ax.imshow(arr, aspect="auto", cmap=cmap,
+                           vmin=vmin, vmax=vmax)
             for i in range(arr.shape[0]):
                 for j in range(arr.shape[1]):
                     val = arr[i, j]
                     if np.isnan(val):
                         continue
-                    text_color = "black" if val > (vmin + vmax) / 2 else "white"
+                    tc = "black" if val > (vmin + vmax) / 2 else "white"
                     ax.text(j, i, f"${val:.0f}", ha="center", va="center",
-                            fontsize=9, color=text_color, fontweight="bold")
+                            fontsize=9, color=tc, fontweight="bold")
 
-            # Format tick labels
-            def _fmt_key(k):
+            def _fk(k):
                 try:
-                    return f"{float(k) * 100:.1f}%"
+                    return f"{float(k)*100:.1f}%"
                 except (TypeError, ValueError):
                     return str(k)
 
             ax.set_xticks(range(len(tg_keys)))
-            ax.set_xticklabels([_fmt_key(k) for k in tg_keys], fontsize=9)
+            ax.set_xticklabels([_fk(k) for k in tg_keys], fontsize=9)
             ax.set_yticks(range(len(wacc_keys)))
-            ax.set_yticklabels([_fmt_key(k) for k in wacc_keys], fontsize=9)
-
+            ax.set_yticklabels([_fk(k) for k in wacc_keys], fontsize=9)
             ax.set_xlabel("Terminal Growth Rate", fontsize=10)
             ax.set_ylabel("WACC", fontsize=10)
-            ax.set_title("DCF Sensitivity Analysis", fontsize=12, color="white",
-                         pad=10, fontweight="bold")
-
+            ax.set_title("DCF Sensitivity Analysis", fontsize=12,
+                         color="white", pad=10, fontweight="bold")
             cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
             cbar.ax.tick_params(labelsize=9)
-
             if current_price:
-                cbar.ax.axhline(y=current_price, color="#F59E0B", linewidth=2,
-                                label="Current")
-
+                cbar.ax.axhline(y=current_price, color="#F59E0B",
+                                linewidth=2)
             fig.tight_layout()
-
             path = os.path.join(self._charts_dir, "sensitivity.png")
             fig.savefig(path, bbox_inches="tight", facecolor="#0B142B")
             plt.close(fig)
             return path
 
     def _create_range_chart(self, combined: dict, current_price) -> str | None:
-        """Bull/base/bear horizontal bar with labels."""
-        low = combined.get("low")
-        mid = combined.get("mid")
-        high = combined.get("high")
-
+        low, mid, high = combined.get("low"), combined.get("mid"), combined.get("high")
         vals = [low, mid, high, current_price]
         if any(v is None for v in vals):
             return None
-
         try:
             low, mid, high, cp = [float(v) for v in vals]
         except (TypeError, ValueError):
             return None
 
         with plt.rc_context(_MPL_RC):
-            fig, ax = plt.subplots(figsize=(5.5, 1.4), dpi=150)
-
-            x_min = min(low, cp) * 0.88
-            x_max = max(high, cp) * 1.12
-
-            # Gradient bar segments
-            ax.barh(0, mid - low, left=low, height=0.5, color="#EF4444",
-                    alpha=0.5, edgecolor="none")
-            ax.barh(0, high - mid, left=mid, height=0.5, color="#10B981",
-                    alpha=0.5, edgecolor="none")
-
-            # Markers
-            ax.plot(cp, 0, marker="v", color="#F59E0B", markersize=15, zorder=5)
-            ax.plot(mid, 0, marker="D", color="#6366F1", markersize=11, zorder=5)
-
-            ax.annotate(f"Current ${cp:.0f}", (cp, 0.42), ha="center", fontsize=9,
-                        color="#F59E0B", fontweight="bold")
-            ax.annotate(f"Base ${mid:.0f}", (mid, -0.42), ha="center", va="top",
-                        fontsize=9, color="#6366F1", fontweight="bold")
-
+            fig, ax = plt.subplots(figsize=(5.5, 1.3), dpi=150)
+            x_min, x_max = min(low, cp) * 0.88, max(high, cp) * 1.12
+            ax.barh(0, mid - low, left=low, height=0.5,
+                    color="#EF4444", alpha=0.5, edgecolor="none")
+            ax.barh(0, high - mid, left=mid, height=0.5,
+                    color="#10B981", alpha=0.5, edgecolor="none")
+            ax.plot(cp, 0, marker="v", color="#F59E0B",
+                    markersize=15, zorder=5)
+            ax.plot(mid, 0, marker="D", color="#6366F1",
+                    markersize=11, zorder=5)
+            ax.annotate(f"Current ${cp:.0f}", (cp, 0.42), ha="center",
+                        fontsize=9, color="#F59E0B", fontweight="bold")
+            ax.annotate(f"Base ${mid:.0f}", (mid, -0.42), ha="center",
+                        va="top", fontsize=9, color="#6366F1",
+                        fontweight="bold")
             ax.set_xlim(x_min, x_max)
             ax.set_ylim(-0.65, 0.7)
             ax.set_yticks([])
             ax.xaxis.set_major_formatter(mticker.FormatStrFormatter("$%.0f"))
-            ax.set_title("Bull / Base / Bear Range", fontsize=11, color="white",
-                         pad=8, fontweight="bold")
+            ax.set_title("Bull / Base / Bear Range", fontsize=11,
+                         color="white", pad=8, fontweight="bold")
             ax.grid(axis="x", alpha=0.2)
             fig.tight_layout()
-
             path = os.path.join(self._charts_dir, "range.png")
             fig.savefig(path, bbox_inches="tight", facecolor="#0B142B")
             plt.close(fig)
