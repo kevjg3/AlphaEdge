@@ -105,11 +105,29 @@ export default function Home() {
             </button>
           </form>
 
-          {/* Right side status */}
+          {/* Right side status + pitch deck download */}
           {result && !isRunning && (
-            <div className="hidden lg:flex items-center gap-2 text-xs text-gray-500">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              Analysis complete
+            <div className="hidden lg:flex items-center gap-3">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Analysis complete
+              </div>
+              <button
+                onClick={() => api.downloadPitchDeck(result.run_id, result.ticker)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg
+                  bg-brand-gradient text-white text-xs font-semibold
+                  hover:opacity-90 shadow-glow-sm hover:shadow-glow
+                  transition-all duration-200"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                     strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Pitch Deck
+              </button>
             </div>
           )}
         </div>

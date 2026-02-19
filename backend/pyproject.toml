@@ -39,6 +39,9 @@ dependencies = [
 
     # Caching
     "diskcache>=5.6",
+
+    # Pitch deck generation
+    "python-pptx>=0.6.21",
 ]
 
 [project.optional-dependencies]

@@ -109,4 +109,23 @@ export const api = {
   getResult: (runId: string) => fetchJSON<FullAnalysis>(`/analysis/result/${runId}`),
 
   listRuns: () => fetchJSON<AnalysisStatus[]>("/analysis/runs"),
+
+  /** Download a PPTX pitch deck for a completed analysis run. */
+  downloadPitchDeck: async (runId: string, ticker: string) => {
+    const base = DIRECT_BACKEND ? `${DIRECT_BACKEND}/api/v1` : BASE;
+    const res = await fetch(`${base}/analysis/pitch-deck/${runId}`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Pitch deck download failed: ${res.status} ${text}`);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${ticker}_pitch_deck.pptx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
