@@ -266,11 +266,12 @@ class YFinanceSource(DataSource):
     # --- Peer Selection ---
 
     def get_peers(self, ticker: str, n: int = 5) -> FetchResult:
-        """Select comparable peers by sector + industry + market cap proximity.
+        """Select comparable peers by sector + market cap proximity.
 
-        Only checks up to ``n + 4`` candidates to limit network calls on
-        constrained deployments (Railway).
+        Fetches candidate market caps in parallel via ThreadPoolExecutor.
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         info_res = self.get_company_info(ticker)
         if not info_res.success:
             return FetchResult(data=[], attribution=self._attr(),
@@ -288,32 +289,31 @@ class YFinanceSource(DataSource):
             ws.append(f"No curated peers for sector '{sector}'")
             return FetchResult(data=[], attribution=self._attr(), warnings=ws)
 
-        # Only check a limited number of candidates to keep latency low.
-        # Each candidate requires a yfinance API call for market cap.
-        max_checks = n + 4  # check a few extra to have margin for filtering
-        peers_with_cap: list[tuple[str, float]] = []
-        consecutive_fails = 0
-        for c in candidates[:max_checks]:
-            if consecutive_fails >= 2:
-                break
+        max_checks = n + 4
+
+        def _check_cap(c: str) -> tuple[str, float] | None:
             try:
-                ct = yf.Ticker(c)
-                c_cap = ct.info.get("marketCap", 0) or 0
+                c_cap = yf.Ticker(c).info.get("marketCap", 0) or 0
                 if c_cap > 0 and market_cap > 0:
                     ratio = c_cap / market_cap
                     if 0.2 <= ratio <= 5.0:
-                        peers_with_cap.append((c, abs(1 - ratio)))
-                consecutive_fails = 0
+                        return (c, abs(1 - ratio))
             except Exception:
-                consecutive_fails += 1
-                continue
+                pass
+            return None
+
+        peers_with_cap: list[tuple[str, float]] = []
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = {pool.submit(_check_cap, c): c for c in candidates[:max_checks]}
+            for fut in as_completed(futures):
+                result = fut.result()
+                if result is not None:
+                    peers_with_cap.append(result)
 
         if not peers_with_cap:
-            # Fallback: just return top N from sector without cap filter
             ws.append("Market cap filtering yielded no peers; using sector list")
             return FetchResult(data=candidates[:n], attribution=self._attr(), warnings=ws)
 
-        # Sort by closest market cap ratio to 1.0
         peers_with_cap.sort(key=lambda x: x[1])
         selected = [p[0] for p in peers_with_cap[:n]]
         return FetchResult(data=selected, attribution=self._attr(), warnings=ws)

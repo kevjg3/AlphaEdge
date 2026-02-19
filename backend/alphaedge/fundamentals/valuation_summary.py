@@ -24,7 +24,12 @@ class ValuationSummary:
         self.dcf = DCFEngine(yf_source)
 
     def full_valuation(self, ticker: str) -> dict:
-        """Run all valuation analyses and combine into a summary."""
+        """Run all valuation analyses and combine into a summary.
+
+        Financial health, comps, and DCF run concurrently via threads.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         warnings: list[str] = []
         attribution: list[dict] = []
 
@@ -33,35 +38,48 @@ class ValuationSummary:
         info = info_result.data or {}
         shares = info.get("shares_outstanding") or info.get("sharesOutstanding")
 
-        # Financial health
+        # Run financial health, comps, and DCF concurrently
         financial_health: dict[str, Any] = {}
-        try:
-            financial_health = self.fs.analyze(ticker)
-            warnings.extend(financial_health.pop("warnings", []))
-            attribution.extend(financial_health.pop("attribution", []))
-        except Exception as e:
-            logger.warning("Financial statements analysis failed: %s", e)
-            warnings.append(f"Financial statements analysis failed: {e}")
-
-        # Comps
         comps_valuation: dict[str, Any] = {}
-        try:
-            comps_valuation = self.comps.run_comps(ticker)
-            warnings.extend(comps_valuation.pop("warnings", []))
-            attribution.extend(comps_valuation.pop("attribution", []))
-        except Exception as e:
-            logger.warning("Comps analysis failed: %s", e)
-            warnings.append(f"Comps analysis failed: {e}")
-
-        # DCF
         dcf_valuation: dict[str, Any] = {}
-        try:
-            dcf_valuation = self.dcf.run_dcf(ticker)
-            warnings.extend(dcf_valuation.pop("warnings", []))
-            attribution.extend(dcf_valuation.pop("attribution", []))
-        except Exception as e:
-            logger.warning("DCF analysis failed: %s", e)
-            warnings.append(f"DCF analysis failed: {e}")
+
+        def _run_fs():
+            return self.fs.analyze(ticker)
+
+        def _run_comps():
+            return self.comps.run_comps(ticker)
+
+        def _run_dcf():
+            return self.dcf.run_dcf(ticker)
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            fs_fut = pool.submit(_run_fs)
+            comps_fut = pool.submit(_run_comps)
+            dcf_fut = pool.submit(_run_dcf)
+
+            try:
+                financial_health = fs_fut.result()
+                warnings.extend(financial_health.pop("warnings", []))
+                attribution.extend(financial_health.pop("attribution", []))
+            except Exception as e:
+                logger.warning("Financial statements analysis failed: %s", e)
+                warnings.append(f"Financial statements analysis failed: {e}")
+
+            try:
+                comps_valuation = comps_fut.result()
+                warnings.extend(comps_valuation.pop("warnings", []))
+                attribution.extend(comps_valuation.pop("attribution", []))
+            except Exception as e:
+                logger.warning("Comps analysis failed: %s", e)
+                warnings.append(f"Comps analysis failed: {e}")
+
+            try:
+                dcf_valuation = dcf_fut.result()
+                warnings.extend(dcf_valuation.pop("warnings", []))
+                attribution.extend(dcf_valuation.pop("attribution", []))
+            except Exception as e:
+                logger.warning("DCF analysis failed: %s", e)
+                warnings.append(f"DCF analysis failed: {e}")
 
         # Combine valuation ranges (comps gives market cap, DCF gives per-share)
         combined_range = self._combine_ranges(comps_valuation, dcf_valuation, shares)

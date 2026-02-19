@@ -53,18 +53,24 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
         run["current_step"] = "fetching_data"
         run["progress"] = 0.05
 
-        # Snapshot
-        info_result = yf.get_company_info(ticker)
+        # Snapshot — fetch info, spot, history in parallel
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            info_fut = pool.submit(yf.get_company_info, ticker)
+            spot_fut = pool.submit(yf.get_spot, ticker)
+            hist_fut = pool.submit(yf.get_history, ticker, f"{req.lookback_years}y")
+
+            info_result = info_fut.result()
+            spot_result = spot_fut.result()
+            hist_result = hist_fut.result()
+
         info = info_result.data or {}
         warnings.extend(info_result.warnings)
         attribution.append(info_result.attribution.to_dict())
 
-        spot_result = yf.get_spot(ticker)
         current_price = spot_result.data
 
-        hist_result = yf.get_history(
-            ticker, period=f"{req.lookback_years}y"
-        )
         hist_df = hist_result.data
         warnings.extend(hist_result.warnings)
 
@@ -296,11 +302,12 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 logger.warning("Risk analysis failed: %s", e)
                 warnings.append(f"Risk analysis failed: {e}")
 
-        # ── Quantitative Analysis ──
+        # ── Quantitative Analysis (run sub-tasks in parallel) ──
         quant_data = None
         run["current_step"] = "quantitative"
         run["progress"] = 0.96
         try:
+            from concurrent.futures import ThreadPoolExecutor
             from alphaedge.quant.performance_metrics import PerformanceAnalyzer
             from alphaedge.quant.return_analysis import ReturnAnalyzer
             from alphaedge.quant.correlation import CorrelationAnalyzer
@@ -309,37 +316,44 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
 
             prices = hist_df["Close"]
 
-            # Performance metrics (+ optional SPY benchmark)
-            perf_analyzer = PerformanceAnalyzer()
-            spy_prices = None
-            try:
-                spy_res = yf.get_history("SPY", period=f"{req.lookback_years}y")
-                if spy_res.success and not spy_res.data.empty:
-                    spy_prices = spy_res.data["Close"]
-            except Exception:
-                pass
-            performance = perf_analyzer.compute(prices, spy_prices)
-            _lap("performance metrics done")
+            # Pre-fetch SPY for performance metrics (will also be cached for correlation)
+            def _perf():
+                analyzer = PerformanceAnalyzer()
+                spy_prices = None
+                try:
+                    spy_res = yf.get_history("SPY", period=f"{req.lookback_years}y")
+                    if spy_res.success and not spy_res.data.empty:
+                        spy_prices = spy_res.data["Close"]
+                except Exception:
+                    pass
+                return analyzer.compute(prices, spy_prices)
 
-            # Return distribution analysis
-            return_analyzer = ReturnAnalyzer()
-            return_analysis = return_analyzer.analyze(prices)
-            _lap("return analysis done")
+            def _returns():
+                return ReturnAnalyzer().analyze(prices)
 
-            # Correlation matrix (reduced benchmarks for speed)
-            corr_analyzer = CorrelationAnalyzer(yf)
-            correlation = corr_analyzer.analyze(ticker, prices)
-            _lap("correlation done")
+            def _corr():
+                return CorrelationAnalyzer(yf).analyze(ticker, prices)
 
-            # Monte Carlo simulation (500 paths for deployed, fast enough)
-            mc_sim = MonteCarloSimulator(seed=req.seed)
-            monte_carlo = mc_sim.simulate(prices, horizon_days=252, n_paths=500)
-            _lap("monte carlo done")
+            def _mc():
+                return MonteCarloSimulator(seed=req.seed).simulate(prices, horizon_days=252, n_paths=500)
 
-            # Signal backtesting
-            backtester = SignalBacktester()
-            signal_backtest = backtester.backtest_all(hist_df)
-            _lap("signal backtest done")
+            def _backtest():
+                return SignalBacktester().backtest_all(hist_df)
+
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                perf_fut = pool.submit(_perf)
+                ret_fut = pool.submit(_returns)
+                corr_fut = pool.submit(_corr)
+                mc_fut = pool.submit(_mc)
+                bt_fut = pool.submit(_backtest)
+
+                performance = perf_fut.result()
+                return_analysis = ret_fut.result()
+                correlation = corr_fut.result()
+                monte_carlo = mc_fut.result()
+                signal_backtest = bt_fut.result()
+
+            _lap("quant (all parallel) done")
 
             # Price series for chart (downsampled)
             price_series = []
@@ -550,4 +564,102 @@ async def run_analysis_sync(req: AnalysisRequest) -> FullAnalysisResponse:
         completed_at=run.get("completed_at"),
         warnings=run.get("warnings", []),
         attribution=run.get("attribution", []),
+    )
+
+
+@router.post("/stream")
+async def run_analysis_stream(req: AnalysisRequest):
+    """Run analysis with SSE progress streaming.
+
+    Streams `event: progress` messages with step/progress data,
+    then a final `event: result` with the full analysis JSON.
+    """
+    import asyncio
+    import json
+
+    from starlette.responses import StreamingResponse
+
+    ticker = req.ticker.upper().strip()
+    run_id = generate_run_id(ticker, req.seed)
+
+    _runs[run_id] = {
+        "run_id": run_id,
+        "ticker": ticker,
+        "status": AnalysisStatus.PENDING,
+        "started_at": datetime.now(timezone.utc),
+        "completed_at": None,
+        "progress": 0.0,
+        "current_step": "queued",
+        "warnings": [],
+        "snapshot": None,
+        "fundamentals": None,
+        "technicals": None,
+        "news": None,
+        "forecast": None,
+        "risk": None,
+        "quant": None,
+        "attribution": [],
+    }
+
+    async def _event_stream():
+        loop = asyncio.get_event_loop()
+        # Start analysis in background thread
+        analysis_future = loop.run_in_executor(None, _run_analysis, run_id, req)
+
+        last_step = ""
+        last_progress = 0.0
+        while not analysis_future.done():
+            run = _runs.get(run_id, {})
+            step = run.get("current_step", "")
+            progress = run.get("progress", 0.0)
+            if step != last_step or abs(progress - last_progress) > 0.01:
+                msg = json.dumps({"step": step, "progress": round(progress, 2)})
+                yield f"event: progress\ndata: {msg}\n\n"
+                last_step = step
+                last_progress = progress
+            await asyncio.sleep(0.3)
+
+        # Ensure we catch any exception from the analysis
+        try:
+            analysis_future.result()
+        except Exception:
+            pass
+
+        # Send final progress
+        yield f"event: progress\ndata: {json.dumps({'step': 'completed', 'progress': 1.0})}\n\n"
+
+        # Build and send the full result
+        run = _runs[run_id]
+        snapshot = run.get("snapshot")
+        if snapshot is None:
+            snapshot = SnapshotResponse(ticker=ticker)
+
+        result = FullAnalysisResponse(
+            run_id=run_id,
+            ticker=ticker,
+            status=run["status"],
+            snapshot=snapshot,
+            fundamentals=run.get("fundamentals"),
+            technicals=run.get("technicals"),
+            news=run.get("news"),
+            forecast=run.get("forecast"),
+            risk=run.get("risk"),
+            quant=run.get("quant"),
+            started_at=run["started_at"],
+            completed_at=run.get("completed_at"),
+            warnings=run.get("warnings", []),
+            attribution=run.get("attribution", []),
+        )
+
+        result_json = result.model_dump_json() if hasattr(result, "model_dump_json") else json.dumps(result.dict(), default=str)
+        yield f"event: result\ndata: {result_json}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )

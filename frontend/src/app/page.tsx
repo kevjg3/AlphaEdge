@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState, useCallback, useRef } from "react";
 import { api, FullAnalysis } from "@/lib/api";
 import SnapshotPanel from "@/components/SnapshotPanel";
 import FundamentalsPanel from "@/components/FundamentalsPanel";
@@ -22,34 +21,89 @@ const TABS = [
 ];
 
 const STEPS = [
-  "Fetching data",
-  "Fundamentals",
-  "Technicals",
-  "News & NLP",
-  "Forecasting",
-  "Risk analysis",
-  "Quant metrics",
-  "Done",
+  { key: "fetching", label: "Fetching data" },
+  { key: "fundamentals", label: "Fundamentals" },
+  { key: "technicals", label: "Technicals" },
+  { key: "news", label: "News & NLP" },
+  { key: "forecast", label: "Forecasting" },
+  { key: "risk", label: "Risk analysis" },
+  { key: "quant", label: "Quant metrics" },
+  { key: "done", label: "Done" },
 ];
+
+/** Map SSE step string to our STEPS index. */
+function stepIndex(step: string): number {
+  const s = step.toLowerCase();
+  if (s.includes("fetch") || s.includes("data")) return 0;
+  if (s.includes("fundamental") || s.includes("valuation")) return 1;
+  if (s.includes("technical")) return 2;
+  if (s.includes("news") || s.includes("sentiment") || s.includes("nlp")) return 3;
+  if (s.includes("forecast")) return 4;
+  if (s.includes("risk")) return 5;
+  if (s.includes("quant") || s.includes("backtest") || s.includes("monte")) return 6;
+  if (s.includes("done") || s.includes("complete")) return 7;
+  return -1;
+}
 
 export default function Home() {
   const [ticker, setTicker] = useState("");
   const [activeTab, setActiveTab] = useState("snapshot");
 
-  const analysisMutation = useMutation({
-    mutationFn: (t: string) => api.runAnalysisSync(t),
-  });
+  // Streaming analysis state
+  const [isRunning, setIsRunning] = useState(false);
+  const [result, setResult] = useState<FullAnalysis | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [activeStepIdx, setActiveStepIdx] = useState(-1);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const t = ticker.trim().toUpperCase();
-    if (!t) return;
-    setActiveTab("snapshot");
-    analysisMutation.mutate(t);
-  };
+  const abortRef = useRef(false);
 
-  const result: FullAnalysis | undefined = analysisMutation.data;
-  const isRunning = analysisMutation.isPending;
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const t = ticker.trim().toUpperCase();
+      if (!t || isRunning) return;
+
+      setActiveTab("snapshot");
+      setIsRunning(true);
+      setResult(undefined);
+      setError(null);
+      setCurrentStep("Starting analysis...");
+      setProgress(0);
+      setActiveStepIdx(-1);
+      abortRef.current = false;
+
+      api
+        .runAnalysisStream(
+          t,
+          (step, pct) => {
+            if (abortRef.current) return;
+            setCurrentStep(step);
+            setProgress(pct);
+            setActiveStepIdx(stepIndex(step));
+          },
+        )
+        .then((data) => {
+          if (abortRef.current) return;
+          setResult(data);
+          setProgress(100);
+          setActiveStepIdx(STEPS.length - 1);
+          setCurrentStep("Done");
+        })
+        .catch((err) => {
+          if (abortRef.current) return;
+          setError(err?.message || "Analysis failed");
+        })
+        .finally(() => {
+          setIsRunning(false);
+        });
+    },
+    [ticker, isRunning],
+  );
+
+  /** Percentage to display (0–100). Backend sends 0.0–1.0. */
+  const pctDisplay = Math.min(Math.round(progress * 100), 100);
 
   return (
     <div className="min-h-screen bg-surface">
@@ -134,7 +188,7 @@ export default function Home() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* Loading State */}
+        {/* Loading State — real progress tracking */}
         {isRunning && (
           <div className="animate-slide-down">
             <div className="bg-surface-raised border border-white/[0.06] rounded-2xl p-6 mb-5">
@@ -147,41 +201,71 @@ export default function Home() {
                     </svg>
                   </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-white">Running Full Analysis</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    This takes 30–90 seconds — fetching data, running models, and computing metrics...
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-semibold text-white">Running Full Analysis</h3>
+                    <span className="text-xs font-mono text-brand-400 tabular-nums">
+                      {pctDisplay}%
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {currentStep || "Initializing..."}
                   </p>
                 </div>
               </div>
-              {/* Animated progress steps */}
+
+              {/* Progress bar */}
+              <div className="w-full h-1.5 bg-white/[0.06] rounded-full overflow-hidden mb-4">
+                <div
+                  className="h-full bg-brand-gradient rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${pctDisplay}%` }}
+                />
+              </div>
+
+              {/* Step indicators */}
               <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
-                {STEPS.map((step, i) => (
-                  <div key={step} className="flex flex-col items-center gap-1.5">
-                    <div
-                      className="w-2 h-2 rounded-full animate-pulse"
-                      style={{
-                        backgroundColor: "rgba(99, 102, 241, 0.6)",
-                        animationDelay: `${i * 0.3}s`,
-                      }}
-                    />
-                    <span className="text-[9px] text-gray-600 text-center leading-tight">
-                      {step}
-                    </span>
-                  </div>
-                ))}
+                {STEPS.map((step, i) => {
+                  const isCompleted = i < activeStepIdx;
+                  const isActive = i === activeStepIdx;
+                  const isPending = i > activeStepIdx;
+
+                  return (
+                    <div key={step.key} className="flex flex-col items-center gap-1.5">
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
+                          isCompleted
+                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]"
+                            : isActive
+                              ? "bg-brand-400 shadow-[0_0_8px_rgba(99,102,241,0.6)] animate-pulse"
+                              : "bg-white/[0.08]"
+                        }`}
+                      />
+                      <span
+                        className={`text-[9px] text-center leading-tight transition-colors duration-300 ${
+                          isCompleted
+                            ? "text-emerald-400/80"
+                            : isActive
+                              ? "text-brand-300 font-medium"
+                              : "text-gray-600"
+                        }`}
+                      >
+                        {step.label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
         )}
 
         {/* Error States */}
-        {analysisMutation.isError && (
+        {error && !isRunning && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-5 text-red-300 text-sm animate-slide-down flex items-start gap-3">
             <span className="text-red-400 mt-0.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
             </span>
-            <span>Analysis failed: {analysisMutation.error.message}</span>
+            <span>Analysis failed: {error}</span>
           </div>
         )}
         {result?.status === "failed" && (
@@ -232,7 +316,7 @@ export default function Home() {
         )}
 
         {/* Empty State */}
-        {!isRunning && !result && !analysisMutation.isError && (
+        {!isRunning && !result && !error && (
           <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
             <div className="w-16 h-16 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-glow mb-6">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
