@@ -31,6 +31,7 @@ class MultiHorizonResult:
     short_term_outlook: str
     long_term_outlook: str
     model_agreement: float
+    accuracy: dict = field(default_factory=dict)  # forecast accuracy metrics
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -40,6 +41,7 @@ class MultiHorizonResult:
             "short_term_outlook": self.short_term_outlook,
             "long_term_outlook": self.long_term_outlook,
             "model_agreement": round(self.model_agreement, 4),
+            "accuracy": self.accuracy,
             "warnings": self.warnings,
         }
 
@@ -143,11 +145,20 @@ class HorizonForecaster:
                 return "bearish"
             return "neutral"
 
+        # --- Accuracy Tracking ---
+        accuracy = {}
+        try:
+            from alphaedge.forecasting.accuracy_tracker import AccuracyTracker
+            accuracy = AccuracyTracker(seed=self.seed).evaluate(prices, ensemble)
+        except Exception as e:
+            logger.debug("Accuracy tracking failed: %s", e)
+
         return MultiHorizonResult(
             forecasts=horizon_results,
             overall_direction=overall,
             short_term_outlook=_outlook(short_dirs),
             long_term_outlook=_outlook(long_dirs),
             model_agreement=agreement,
+            accuracy=accuracy,
             warnings=warnings,
         )

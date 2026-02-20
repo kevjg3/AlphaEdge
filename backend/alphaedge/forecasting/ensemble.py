@@ -20,6 +20,7 @@ class EnsembleResult:
     model_weights: dict  # model_name -> weight
     best_model: str
     confidence: float
+    decomposition: dict = field(default_factory=dict)  # model_name -> {raw_return, weight, weighted_return}
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -29,6 +30,7 @@ class EnsembleResult:
             "model_weights": {k: round(v, 4) for k, v in self.model_weights.items()},
             "best_model": self.best_model,
             "confidence": round(self.confidence, 4),
+            "decomposition": self.decomposition,
             "warnings": self.warnings,
         }
 
@@ -215,11 +217,26 @@ class EnsembleForecaster:
         # Best model (highest confidence among valid)
         best = max(valid_results, key=lambda x: x[1].confidence)
 
+        # Decomposition: each model's weighted contribution to ensemble return
+        decomposition = {}
+        total_w = sum(self._weights.get(name, 0) for name, _ in valid_results)
+        if total_w > 0:
+            for name, result in valid_results:
+                w = self._weights.get(name, 0)
+                raw_ret = result.predicted_return
+                weighted_ret = raw_ret * w / total_w
+                decomposition[name] = {
+                    "raw_return": round(raw_ret, 4),
+                    "weight": round(w, 4),
+                    "weighted_return": round(weighted_ret, 4),
+                }
+
         return EnsembleResult(
             individual_forecasts=individual,
             ensemble_prediction=ensemble_result.to_dict(),
             model_weights=self._weights,
             best_model=best[0],
             confidence=avg_conf,
+            decomposition=decomposition,
             warnings=warnings,
         )

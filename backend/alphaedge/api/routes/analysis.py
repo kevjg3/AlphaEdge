@@ -161,6 +161,11 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 from alphaedge.technicals.indicators import TechnicalIndicators
                 from alphaedge.technicals.regime_detection import RegimeDetector
                 from alphaedge.technicals.support_resistance import SupportResistance
+                from alphaedge.technicals.ichimoku import IchimokuAnalyzer
+                from alphaedge.technicals.volume_profile import VolumeProfileAnalyzer
+                from alphaedge.technicals.confluence import ConfluenceScorer
+                from alphaedge.technicals.divergence import DivergenceDetector
+                from alphaedge.technicals.relative_strength import RelativeStrengthAnalyzer
 
                 indicators = TechnicalIndicators.compute_all(hist_df)
                 regime = RegimeDetector(seed=req.seed).detect(hist_df["Close"])
@@ -175,12 +180,52 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 except Exception as e:
                     warnings.append(f"Factor model failed: {e}")
 
+                # New technicals (each wrapped independently)
+                ichimoku = {}
+                try:
+                    ichimoku = IchimokuAnalyzer().compute(hist_df)
+                except Exception as e:
+                    logger.warning("Ichimoku failed: %s", e)
+
+                volume_profile = {}
+                try:
+                    volume_profile = VolumeProfileAnalyzer().analyze(hist_df)
+                except Exception as e:
+                    logger.warning("Volume profile failed: %s", e)
+
+                divergence = {}
+                try:
+                    divergence = DivergenceDetector().detect(hist_df)
+                except Exception as e:
+                    logger.warning("Divergence detection failed: %s", e)
+
+                confluence = {}
+                try:
+                    confluence = ConfluenceScorer().score(indicators, sr)
+                except Exception as e:
+                    logger.warning("Confluence scoring failed: %s", e)
+
+                rel_strength = {}
+                try:
+                    sector = info.get("sector")
+                    if sector:
+                        rel_strength = RelativeStrengthAnalyzer().analyze(
+                            ticker, hist_df["Close"], yf, sector
+                        )
+                except Exception as e:
+                    logger.warning("Relative strength failed: %s", e)
+
                 _lap("technicals computed")
                 technicals_data = {
                     "indicators": indicators,
                     "regime": regime.to_dict() if hasattr(regime, "to_dict") else regime,
                     "support_resistance": sr,
                     "factor_exposures": factor_data or {},
+                    "ichimoku": ichimoku,
+                    "volume_profile": volume_profile,
+                    "confluence": confluence,
+                    "divergence": divergence,
+                    "relative_strength": rel_strength,
                 }
                 run["progress"] = 0.45
             except Exception as e:
