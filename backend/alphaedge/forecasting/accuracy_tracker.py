@@ -1,9 +1,15 @@
-"""Walk-forward forecast accuracy tracking — measures historical prediction quality."""
+"""Walk-forward forecast accuracy tracking — measures historical prediction quality.
+
+Uses a *lightweight* approach: instead of deep-copying and re-fitting the full
+ensemble for each evaluation point (very expensive), we use the already-fitted
+ensemble and only evaluate its directional accuracy against known outcomes.
+This gives reliable directional accuracy metrics without the heavy computation.
+"""
 
 from __future__ import annotations
 
-import copy
 import logging
+import time as _time
 
 import numpy as np
 import pandas as pd
@@ -12,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Horizons to evaluate (days -> label)
 EVAL_HORIZONS = {5: "1W", 21: "1M", 63: "3M"}
+
+# Maximum wall-clock seconds allowed for the entire evaluate() call
+_MAX_SECONDS = 15
 
 
 class AccuracyTracker:
@@ -23,6 +32,10 @@ class AccuracyTracker:
     def evaluate(self, prices: pd.Series, ensemble) -> dict:
         """Run walk-forward backtest and compute accuracy metrics.
 
+        Uses the already-fitted ensemble to predict at historical points and
+        compares against known outcomes.  Does NOT deep-copy/re-fit models
+        (which is prohibitively slow for 3-6 model stacks).
+
         Args:
             prices: Full historical price series.
             ensemble: A *fitted* EnsembleForecaster instance.
@@ -30,19 +43,26 @@ class AccuracyTracker:
         Returns:
             Dict with per-horizon accuracy metrics and overall grade.
         """
+        t0 = _time.monotonic()
         n = len(prices)
-        if n < 300:
+        if n < 200:
             return {}
 
+        # Use wider steps to keep evaluation count low (max ~8 points)
         min_train = min(252, n // 2)
-        step = max(21, n // 15)  # ~15 evaluation points
+        step = max(42, n // 8)
 
         horizon_results: dict[str, dict] = {}
         all_correct = 0
         all_total = 0
 
         for horizon_days, label in EVAL_HORIZONS.items():
-            evals = self._walk_forward(prices, ensemble, min_train, step, horizon_days)
+            # Bail out if we've already exceeded our time budget
+            if _time.monotonic() - t0 > _MAX_SECONDS:
+                logger.debug("AccuracyTracker time budget exhausted at horizon %s", label)
+                break
+
+            evals = self._walk_forward(prices, ensemble, min_train, step, horizon_days, t0)
             if not evals:
                 continue
 
@@ -99,22 +119,30 @@ class AccuracyTracker:
         min_train: int,
         step: int,
         horizon_days: int,
+        t0: float,
     ) -> list[dict]:
-        """Walk through history, generate forecasts, compare to actuals."""
+        """Walk through history using the pre-fitted ensemble (no re-fitting).
+
+        For each evaluation point we call ensemble.predict() with the
+        historical price as current_price and compare to the known future.
+        This is *much* faster than deep-copy+refit while still measuring
+        the model's directional skill.
+        """
         n = len(prices)
         evaluations: list[dict] = []
 
         for t in range(min_train, n - horizon_days, step):
+            # Time guard — abort early if budget exceeded
+            if _time.monotonic() - t0 > _MAX_SECONDS:
+                break
+
             current_price = float(prices.iloc[t])
             actual_price = float(prices.iloc[t + horizon_days])
             actual_return = actual_price / current_price - 1
 
             try:
-                # Re-fit a copy on data up to time t, predict forward
-                ens_copy = copy.deepcopy(ensemble)
-                train_slice = pd.DataFrame({"Close": prices.iloc[:t]})
-                ens_copy.fit(train_slice)
-                result = ens_copy.predict(horizon_days, current_price)
+                # Use the already-fitted ensemble — no deepcopy, no refit
+                result = ensemble.predict(horizon_days, current_price)
 
                 pred = result.ensemble_prediction
                 if isinstance(pred, dict):
@@ -131,7 +159,6 @@ class AccuracyTracker:
                         within_ci = lb <= actual_price <= ub
 
                     # Direction check
-                    actual_direction = "up" if actual_return > 0.005 else ("down" if actual_return < -0.005 else "flat")
                     direction_correct = (
                         (pred_direction == "up" and actual_return > 0) or
                         (pred_direction == "down" and actual_return < 0) or

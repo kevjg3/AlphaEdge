@@ -47,13 +47,21 @@ class RelativeStrengthAnalyzer:
 
         etf_ticker = SECTOR_ETFS[sector]
 
-        # Fetch sector ETF prices
+        # Fetch sector ETF prices (with timeout to avoid blocking the pipeline)
         try:
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
             lookback_years = max(1, len(prices) // 252)
-            etf_result = yf_source.get_history(etf_ticker, period=f"{lookback_years}y")
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(yf_source.get_history, etf_ticker, f"{lookback_years}y")
+                etf_result = fut.result(timeout=10)  # 10s hard cap
+
             if not etf_result.success or etf_result.data.empty:
                 return {}
             etf_prices = etf_result.data["Close"]
+        except FuturesTimeout:
+            logger.warning("Sector ETF %s fetch timed out after 10s", etf_ticker)
+            return {}
         except Exception as e:
             logger.warning("Failed to fetch sector ETF %s: %s", etf_ticker, e)
             return {}

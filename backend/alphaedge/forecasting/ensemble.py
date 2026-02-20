@@ -65,14 +65,25 @@ class EnsembleForecaster:
         self._fitted = True
 
     def _learn_weights(self, train_data: pd.DataFrame) -> None:
-        """Learn model weights from walk-forward predictions."""
+        """Learn model weights from walk-forward predictions.
+
+        Has a time budget of 30 seconds.  Uses wider steps and caps iterations
+        to keep total model-fits reasonable.
+        """
+        import copy
+        import time as _time
+
         from sklearn.linear_model import Ridge
+
+        _MAX_SECONDS = 30
+        t0 = _time.monotonic()
 
         prices = train_data["Close"] if isinstance(train_data, pd.DataFrame) else train_data
         n = len(prices)
 
         min_train = min(252, n // 2)
-        step = max(21, n // 10)
+        # Wider steps → fewer iterations (aim for ~5-6 evaluation points)
+        step = max(42, n // 6)
         horizon = 5  # short horizon for weight learning
 
         # Collect OOF predictions
@@ -80,13 +91,17 @@ class EnsembleForecaster:
         actuals: list[float] = []
 
         for start in range(min_train, n - horizon, step):
+            # Time guard
+            if _time.monotonic() - t0 > _MAX_SECONDS:
+                logger.debug("Weight learning time budget exhausted at step %d", start)
+                break
+
             actual = float(prices.iloc[min(start + horizon, n - 1)])
             current = float(prices.iloc[start - 1])
             actuals.append(actual)
 
             for fc in self.forecasters:
                 try:
-                    import copy
                     fc_copy = copy.deepcopy(fc)
                     if isinstance(train_data, pd.DataFrame):
                         fc_copy.fit(train_data.iloc[:start])
