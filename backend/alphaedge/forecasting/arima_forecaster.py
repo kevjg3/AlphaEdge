@@ -36,30 +36,27 @@ class ARIMAForecaster(BaseForecaster):
             logger.warning("ARIMA: insufficient data (%d points)", len(self._log_prices))
             return
 
-        # Grid search for best (p,d,q) by AIC — with 15s time budget
-        _MAX_GRID_SECONDS = 15
+        # Focused grid search — only the most useful ARIMA orders, with 10s budget
+        _MAX_GRID_SECONDS = 10
         t0 = _time.monotonic()
         best_aic = np.inf
         best_order = (1, 1, 0)
 
-        for p in [0, 1, 2]:
-            for d in [0, 1]:
-                for q in [0, 1, 2]:
-                    if p == 0 and q == 0:
-                        continue
-                    if _time.monotonic() - t0 > _MAX_GRID_SECONDS:
-                        logger.debug("ARIMA grid search timed out, using best so far %s", best_order)
-                        break
-                    try:
-                        with _warnings.catch_warnings():
-                            _warnings.simplefilter("ignore")
-                            model = ARIMA(self._log_prices, order=(p, d, q))
-                            result = model.fit()
-                            if result.aic < best_aic:
-                                best_aic = result.aic
-                                best_order = (p, d, q)
-                    except Exception:
-                        continue
+        _ORDERS = [(1, 1, 0), (0, 1, 1), (1, 1, 1), (2, 1, 0), (1, 0, 0), (0, 1, 2)]
+        for order in _ORDERS:
+            if _time.monotonic() - t0 > _MAX_GRID_SECONDS:
+                logger.debug("ARIMA grid search timed out, using best so far %s", best_order)
+                break
+            try:
+                with _warnings.catch_warnings():
+                    _warnings.simplefilter("ignore")
+                    model = ARIMA(self._log_prices, order=order)
+                    result = model.fit()
+                    if result.aic < best_aic:
+                        best_aic = result.aic
+                        best_order = order
+            except Exception:
+                continue
 
         # Fit with best order
         try:

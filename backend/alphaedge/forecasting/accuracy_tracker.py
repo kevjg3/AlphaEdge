@@ -48,9 +48,9 @@ class AccuracyTracker:
         if n < 200:
             return {}
 
-        # Use wider steps to keep evaluation count low (max ~8 points)
+        # Use wide steps to keep evaluation count low (max ~4 points)
         min_train = min(252, n // 2)
-        step = max(42, n // 8)
+        step = max(63, n // 5)
 
         horizon_results: dict[str, dict] = {}
         all_correct = 0
