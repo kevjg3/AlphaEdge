@@ -313,6 +313,10 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
             from alphaedge.quant.correlation import CorrelationAnalyzer
             from alphaedge.quant.monte_carlo import MonteCarloSimulator
             from alphaedge.quant.signal_backtest import SignalBacktester
+            from alphaedge.quant.mean_reversion import MeanReversionAnalyzer
+            from alphaedge.quant.volatility_forecast import GarchForecaster
+            from alphaedge.quant.momentum_signals import MomentumAnalyzer
+            from alphaedge.quant.alpha_intelligence import AlphaIntelligenceAnalyzer
 
             prices = hist_df["Close"]
 
@@ -340,18 +344,56 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
             def _backtest():
                 return SignalBacktester().backtest_all(hist_df)
 
-            with ThreadPoolExecutor(max_workers=5) as pool:
+            def _mean_reversion():
+                return MeanReversionAnalyzer().analyze(prices)
+
+            def _garch():
+                return GarchForecaster().forecast(prices)
+
+            def _momentum():
+                return MomentumAnalyzer().analyze(prices)
+
+            def _alpha_intel():
+                return AlphaIntelligenceAnalyzer(seed=req.seed).analyze(prices, hist_df)
+
+            with ThreadPoolExecutor(max_workers=9) as pool:
                 perf_fut = pool.submit(_perf)
                 ret_fut = pool.submit(_returns)
                 corr_fut = pool.submit(_corr)
                 mc_fut = pool.submit(_mc)
                 bt_fut = pool.submit(_backtest)
+                mr_fut = pool.submit(_mean_reversion)
+                garch_fut = pool.submit(_garch)
+                mom_fut = pool.submit(_momentum)
+                ai_fut = pool.submit(_alpha_intel)
 
                 performance = perf_fut.result()
                 return_analysis = ret_fut.result()
                 correlation = corr_fut.result()
                 monte_carlo = mc_fut.result()
                 signal_backtest = bt_fut.result()
+
+                # New alpha signal analyzers — each wrapped independently
+                try:
+                    mean_reversion = mr_fut.result()
+                except Exception as e:
+                    logger.warning("Mean reversion analysis failed: %s", e)
+                    mean_reversion = {}
+                try:
+                    garch_forecast = garch_fut.result()
+                except Exception as e:
+                    logger.warning("GARCH forecast failed: %s", e)
+                    garch_forecast = {}
+                try:
+                    momentum = mom_fut.result()
+                except Exception as e:
+                    logger.warning("Momentum analysis failed: %s", e)
+                    momentum = {}
+                try:
+                    alpha_intel = ai_fut.result()
+                except Exception as e:
+                    logger.warning("Alpha intelligence failed: %s", e)
+                    alpha_intel = {}
 
             _lap("quant (all parallel) done")
 
@@ -374,6 +416,10 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 "monte_carlo": monte_carlo,
                 "signal_backtest": signal_backtest,
                 "price_series": price_series,
+                "mean_reversion": mean_reversion.to_dict() if hasattr(mean_reversion, "to_dict") else mean_reversion,
+                "garch_forecast": garch_forecast.to_dict() if hasattr(garch_forecast, "to_dict") else garch_forecast,
+                "momentum": momentum.to_dict() if hasattr(momentum, "to_dict") else momentum,
+                "alpha_intelligence": alpha_intel.to_dict() if hasattr(alpha_intel, "to_dict") else alpha_intel,
             }
         except Exception as e:
             logger.warning("Quantitative analysis failed: %s", e)

@@ -1,1 +1,1 @@
-"""Quantitative analysis modules — performance metrics, return analysis, correlations, Monte Carlo, signal backtesting."""
+"""Quantitative analysis modules — performance, returns, correlations, Monte Carlo, signals, mean reversion, GARCH, momentum, alpha intelligence."""
