@@ -308,7 +308,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                         ohlcv_df=hist_df, ticker=ticker,
                     )
 
-                forecast_timeout = min(90, _budget_left() - 10)
+                forecast_timeout = min(60, _budget_left() - 10)
                 with _TPE(max_workers=1) as pool:
                     fut = pool.submit(_do_forecast)
                     multi = fut.result(timeout=forecast_timeout)
