@@ -10,8 +10,9 @@ import RollingMetrics from "./charts/RollingMetrics";
 import BacktestResults from "./charts/BacktestResults";
 import PerformanceTable from "./charts/PerformanceTable";
 import SeasonalityChart from "./charts/SeasonalityChart";
+import AlphaSignalsDashboard from "./charts/AlphaSignalsDashboard";
 
-type SubTab = "overview" | "montecarlo" | "distribution" | "correlation" | "signals" | "seasonality";
+type SubTab = "overview" | "montecarlo" | "distribution" | "correlation" | "signals" | "seasonality" | "alpha";
 
 const SUB_TABS: { id: SubTab; label: string }[] = [
   { id: "overview", label: "Performance" },
@@ -20,6 +21,7 @@ const SUB_TABS: { id: SubTab; label: string }[] = [
   { id: "correlation", label: "Correlation" },
   { id: "signals", label: "Signals" },
   { id: "seasonality", label: "Seasonality" },
+  { id: "alpha", label: "Alpha Signals" },
 ];
 
 export default function QuantPanel({ data }: { data: Record<string, any> | null }) {
@@ -41,6 +43,10 @@ export default function QuantPanel({ data }: { data: Record<string, any> | null 
   const priceSeries = data.price_series || [];
   const rolling = returnAnalysis.rolling_metrics || {};
   const seasonality = returnAnalysis.seasonality || {};
+  const meanReversion = data.mean_reversion || {};
+  const garchForecast = data.garch_forecast || {};
+  const momentumData = data.momentum || {};
+  const alphaIntel = data.alpha_intelligence || {};
 
   return (
     <div className="space-y-5 animate-slide-up">
@@ -275,6 +281,18 @@ export default function QuantPanel({ data }: { data: Record<string, any> | null 
               </div>
             </Card>
           )}
+        </div>
+      )}
+
+      {/* ALPHA SIGNALS */}
+      {subTab === "alpha" && (
+        <div className="animate-fade-in">
+          <AlphaSignalsDashboard
+            meanReversion={meanReversion}
+            garchForecast={garchForecast}
+            momentum={momentumData}
+            alphaIntelligence={alphaIntel}
+          />
         </div>
       )}
     </div>
