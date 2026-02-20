@@ -26,6 +26,7 @@ class ARIMAForecaster(BaseForecaster):
         self._log_prices = None
 
     def fit(self, train_data: pd.DataFrame) -> None:
+        import time as _time
         from statsmodels.tsa.arima.model import ARIMA
 
         prices = train_data["Close"] if isinstance(train_data, pd.DataFrame) else train_data
@@ -35,7 +36,9 @@ class ARIMAForecaster(BaseForecaster):
             logger.warning("ARIMA: insufficient data (%d points)", len(self._log_prices))
             return
 
-        # Grid search for best (p,d,q) by AIC
+        # Grid search for best (p,d,q) by AIC — with 15s time budget
+        _MAX_GRID_SECONDS = 15
+        t0 = _time.monotonic()
         best_aic = np.inf
         best_order = (1, 1, 0)
 
@@ -44,6 +47,9 @@ class ARIMAForecaster(BaseForecaster):
                 for q in [0, 1, 2]:
                     if p == 0 and q == 0:
                         continue
+                    if _time.monotonic() - t0 > _MAX_GRID_SECONDS:
+                        logger.debug("ARIMA grid search timed out, using best so far %s", best_order)
+                        break
                     try:
                         with _warnings.catch_warnings():
                             _warnings.simplefilter("ignore")

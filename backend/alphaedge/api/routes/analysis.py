@@ -25,6 +25,9 @@ router = APIRouter()
 _runs: dict[str, dict[str, Any]] = {}
 
 
+_PIPELINE_TIMEOUT = 180  # seconds — hard limit for entire pipeline
+
+
 def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
     """Execute the full analysis pipeline in the background."""
     import time as _time
@@ -39,6 +42,10 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
     def _lap(label: str):
         elapsed = _time.time() - _t0
         logger.info("[%s] %s — %.1fs elapsed", ticker, label, elapsed)
+
+    def _budget_left() -> float:
+        """Seconds remaining before hard pipeline timeout."""
+        return max(0, _PIPELINE_TIMEOUT - (_time.time() - _t0))
 
     try:
         # ── Data ingestion ──
@@ -61,9 +68,9 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
             spot_fut = pool.submit(yf.get_spot, ticker)
             hist_fut = pool.submit(yf.get_history, ticker, f"{req.lookback_years}y")
 
-            info_result = info_fut.result()
-            spot_result = spot_fut.result()
-            hist_result = hist_fut.result()
+            info_result = info_fut.result(timeout=30)
+            spot_result = spot_fut.result(timeout=30)
+            hist_result = hist_fut.result(timeout=30)
 
         info = info_result.data or {}
         warnings.extend(info_result.warnings)
@@ -286,18 +293,32 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
 
         # ── Forecasting ──
         forecast_data = None
-        if req.include_forecast:
+        if req.include_forecast and _budget_left() > 15:
             run["current_step"] = "forecasting"
             try:
+                from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _Timeout
                 from alphaedge.forecasting.horizons import HorizonForecaster
 
                 hf = HorizonForecaster(seed=req.seed)
-                multi = hf.run_all_horizons(
-                    hist_df["Close"], current_price,
-                    ohlcv_df=hist_df, ticker=ticker,
-                )
+
+                # Run forecasting in a thread with a time cap
+                def _do_forecast():
+                    return hf.run_all_horizons(
+                        hist_df["Close"], current_price,
+                        ohlcv_df=hist_df, ticker=ticker,
+                    )
+
+                forecast_timeout = min(90, _budget_left() - 10)
+                with _TPE(max_workers=1) as pool:
+                    fut = pool.submit(_do_forecast)
+                    multi = fut.result(timeout=forecast_timeout)
+
                 forecast_data = multi.to_dict() if hasattr(multi, "to_dict") else {}
                 _lap("forecasting done")
+                run["progress"] = 0.80
+            except _Timeout:
+                logger.warning("Forecasting timed out after %.0fs", forecast_timeout)
+                warnings.append("Forecasting timed out")
                 run["progress"] = 0.80
             except Exception as e:
                 logger.warning("Forecasting failed: %s", e)
@@ -401,6 +422,7 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
             def _alpha_intel():
                 return AlphaIntelligenceAnalyzer(seed=req.seed).analyze(prices, hist_df)
 
+            quant_timeout = min(60, _budget_left() - 5)
             with ThreadPoolExecutor(max_workers=9) as pool:
                 perf_fut = pool.submit(_perf)
                 ret_fut = pool.submit(_returns)
@@ -412,30 +434,30 @@ def _run_analysis(run_id: str, req: AnalysisRequest) -> None:
                 mom_fut = pool.submit(_momentum)
                 ai_fut = pool.submit(_alpha_intel)
 
-                performance = perf_fut.result()
-                return_analysis = ret_fut.result()
-                correlation = corr_fut.result()
-                monte_carlo = mc_fut.result()
-                signal_backtest = bt_fut.result()
+                performance = perf_fut.result(timeout=quant_timeout)
+                return_analysis = ret_fut.result(timeout=quant_timeout)
+                correlation = corr_fut.result(timeout=quant_timeout)
+                monte_carlo = mc_fut.result(timeout=quant_timeout)
+                signal_backtest = bt_fut.result(timeout=quant_timeout)
 
                 # New alpha signal analyzers — each wrapped independently
                 try:
-                    mean_reversion = mr_fut.result()
+                    mean_reversion = mr_fut.result(timeout=quant_timeout)
                 except Exception as e:
                     logger.warning("Mean reversion analysis failed: %s", e)
                     mean_reversion = {}
                 try:
-                    garch_forecast = garch_fut.result()
+                    garch_forecast = garch_fut.result(timeout=quant_timeout)
                 except Exception as e:
                     logger.warning("GARCH forecast failed: %s", e)
                     garch_forecast = {}
                 try:
-                    momentum = mom_fut.result()
+                    momentum = mom_fut.result(timeout=quant_timeout)
                 except Exception as e:
                     logger.warning("Momentum analysis failed: %s", e)
                     momentum = {}
                 try:
-                    alpha_intel = ai_fut.result()
+                    alpha_intel = ai_fut.result(timeout=quant_timeout)
                 except Exception as e:
                     logger.warning("Alpha intelligence failed: %s", e)
                     alpha_intel = {}
